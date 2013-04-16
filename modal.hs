@@ -1,5 +1,7 @@
 import Control.Applicative
 import Data.List
+import Data.Map.Lazy (Map, (!))
+import qualified Data.Map.Lazy as M
 
 -- Modal Logic Formula data structure
 data ModalFormula = Val {value :: Bool}
@@ -207,3 +209,21 @@ fixpointGLEval var fi = result
       handleDia = scanl (||) False
       }
     result = modalEval evalHandler fi
+
+generalFixpointGLEval :: Map String ModalFormula -> Map String [Bool]
+generalFixpointGLEval formulaMap = evalMap
+  where
+    evalMap = M.map (modalEval evalHandler) formulaMap
+    evalHandler = ModalEvaluator {
+      handleVal = repeat,
+      handleVar = (\var -> case M.lookup var evalMap of
+        Just l -> l
+        Nothing -> error "Unmapped variable in generalFixpointGLEval"),
+      handleNeg = fmap not,
+      handleAnd = zipWith (&&),
+      handleOr  = zipWith (||),
+      handleImp = zipWith (<=),
+      handleIff = zipWith (==),
+      handleBox = scanl (&&) True,
+      handleDia = scanl (||) False
+      }
