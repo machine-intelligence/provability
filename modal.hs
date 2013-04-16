@@ -1,4 +1,5 @@
 import Control.Applicative
+import Data.List
 
 -- Modal Logic Formula data structure
 data ModalFormula = Val {value :: Bool}
@@ -169,10 +170,10 @@ glEvalHandler = ModalEvaluator {
     handleVal = repeat,
     handleVar = error "Variables are not supported in GLEval.",
     handleNeg = fmap not,
-    handleAnd = liftA2 (&&),
-    handleOr = liftA2 (||),
-    handleImp = liftA2 (<=),
-    handleIff = liftA2 (==),
+    handleAnd = zipWith (&&),
+    handleOr = zipWith (||),
+    handleImp = zipWith (<=),
+    handleIff = zipWith (==),
     handleBox = scanl (&&) True,
     handleDia = scanl (||) False}
 
@@ -181,6 +182,12 @@ glEval = modalEval glEvalHandler
 
 glEvalStandard :: ModalFormula -> Bool
 glEvalStandard formula = (glEval formula) !! (maxModalDepth formula)
+
+simplifiedMaxDepth :: ModalFormula -> Int
+simplifiedMaxDepth formula = 
+  depth - (length $ (!!0) $ group $ reverse results) + 1 where
+    results = take (depth+1) (glEval formula)
+    depth = maxModalDepth formula
 
 fixpointGLEval :: String -> ModalFormula -> [Bool]
 fixpointGLEval var fi = result
@@ -197,4 +204,3 @@ fixpointGLEval var fi = result
       handleDia = scanl (||) False
       }
     result = modalEval evalHandler fi
-
