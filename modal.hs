@@ -72,6 +72,7 @@ instance Show ModalFormula where
  
 -- Propositional evaluation of the modal formula
 
+propositionalEvalHandler :: ModalEvaluator (Maybe Bool)
 propositionalEvalHandler = ModalEvaluator {
     handleVal = Just,
     handleVar = const Nothing,
@@ -83,11 +84,12 @@ propositionalEvalHandler = ModalEvaluator {
     handleBox = const Nothing,
     handleDia = const Nothing}
 
+propositionalEval :: ModalFormula -> Maybe Bool
 propositionalEval = modalEval propositionalEvalHandler 
 
 -- Evaluate the modal formula assuming the soundness of the system
-evalWithSoundnessHandler :: ModalEvaluator (Maybe Bool)
 
+evalWithSoundnessHandler :: ModalEvaluator (Maybe Bool)
 evalWithSoundnessHandler = ModalEvaluator {
     handleVal = Just,
     handleVar = const Nothing,
@@ -103,6 +105,7 @@ evalWithSoundness :: ModalFormula -> Maybe Bool
 evalWithSoundness = modalEval evalWithSoundnessHandler
 
 -- How to simplify modal formulas:
+mapFormulaOutput :: (Bool -> Bool) -> ModalFormula -> ModalFormula
 mapFormulaOutput f formula =
   g (f False) (f True) where
     g True True = (Val True)
@@ -110,6 +113,10 @@ mapFormulaOutput f formula =
     g False True = formula
     g True False = (Neg formula)
 
+simplifyBinaryOperator :: (ModalFormula -> ModalFormula -> ModalFormula) ->
+                          (Bool -> Bool -> Bool) ->
+                          ModalFormula -> ModalFormula ->
+                          ModalFormula
 simplifyBinaryOperator op behavior (Val a) (Val b) = Val (behavior a b)
 simplifyBinaryOperator op behavior (Val a) formula =
   mapFormulaOutput (\b -> behavior a b) formula
@@ -117,13 +124,16 @@ simplifyBinaryOperator op behavior formula (Val b) =
   mapFormulaOutput (\a -> behavior a b) formula
 simplifyBinaryOperator op behavior f1 f2 = op f1 f2
 
-
+simplifyNeg :: ModalFormula -> ModalFormula
 simplifyNeg (Val v) = (Val (not v))
 simplifyNeg (Neg x) = x
 simplifyNeg x = (Neg x)
 
+simplifyBox :: ModalFormula -> ModalFormula
 simplifyBox t@(Val True) = t
 simplifyBox x = (Box x)
+
+simplifyDia :: ModalFormula -> ModalFormula
 simplifyDia f@(Val False) = f
 simplifyDia x = (Dia x)
 
