@@ -1,4 +1,4 @@
-import Control.Applicative;
+import Control.Applicative
 
 -- Modal Logic Formula data structure
 data ModalFormula = Val {value :: Bool}
@@ -46,7 +46,7 @@ modalEval m = f where
   f (Or x y) = (handleOr m) (f x) (f y)
   f (Imp x y) = (handleImp m) (f x) (f y)
   f (Box x) = (handleBox m) (f x)
-  f (Dia x) = (handleDia m) (f x);
+  f (Dia x) = (handleDia m) (f x)
 
 
 -- Pretty Printing
