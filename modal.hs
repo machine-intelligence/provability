@@ -181,3 +181,20 @@ glEval = modalEval glEvalHandler
 
 glEvalStandard :: ModalFormula -> Bool
 glEvalStandard formula = (glEval formula) !! (maxModalDepth formula)
+
+fixpointGLEval :: String -> ModalFormula -> [Bool]
+fixpointGLEval var fi = result
+  where
+    evalHandler = ModalEvaluator {
+      handleVal = repeat,
+      handleVar = \var' -> if var == var' then result else error "Variable other than the fixpoint in fixpointGLEval",
+      handleNeg = fmap not,
+      handleAnd = zipWith (&&),
+      handleOr  = zipWith (||),
+      handleImp = zipWith (<=),
+      handleIff = zipWith (==),
+      handleBox = scanl (&&) True,
+      handleDia = scanl (||) False
+      }
+    result = modalEval evalHandler fi
+
