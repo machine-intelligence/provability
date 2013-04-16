@@ -7,10 +7,14 @@ data ModalFormula = Val {value :: Bool}
                   | And {left, right :: ModalFormula}
                   | Or {left, right :: ModalFormula}
                   | Imp {left, right :: ModalFormula}
+                  | Iff {left, right :: ModalFormula}
                   | Box {contents :: ModalFormula}
                   | Dia {contents :: ModalFormula}
 
 -- Syntactic Conveniences:
+infixr   5 %=
+(%=) = Iff
+
 infixr   6 %>
 (%>) = Imp
 
@@ -33,6 +37,7 @@ data ModalEvaluator a = ModalEvaluator {
     handleAnd :: a -> a -> a,
     handleOr :: a -> a -> a,
     handleImp :: a -> a -> a,
+    handleIff :: a -> a -> a,
     handleBox :: a -> a,
     handleDia :: a -> a}
 
@@ -45,6 +50,7 @@ modalEval m = f where
   f (And x y) = (handleAnd m) (f x) (f y)
   f (Or x y) = (handleOr m) (f x) (f y)
   f (Imp x y) = (handleImp m) (f x) (f y)
+  f (Iff x y) = (handleIff m) (f x) (f y)
   f (Box x) = (handleBox m) (f x)
   f (Dia x) = (handleDia m) (f x)
 
@@ -58,6 +64,7 @@ modalFormulaPrettyPrinter = ModalEvaluator {
     handleAnd = (\x y -> "("++x++" %^ "++y++")"),
     handleOr = (\x y -> "("++x++" %| "++y++")"),
     handleImp = (\x y -> "("++x++" %> "++y++")"),
+    handleIff = (\x y -> "("++x++" %= "++y++")"),
     handleBox = (\x -> "(Box "++ x ++ ")"),
     handleDia = (\x -> "(Dia "++x++")")}
 instance Show ModalFormula where
@@ -72,6 +79,7 @@ propositionalEvalHandler = ModalEvaluator {
     handleAnd = liftA2 (&&),
     handleOr = liftA2 (||),
     handleImp = liftA2 (<=),
+    handleIff = liftA2 (==),
     handleBox = const Nothing,
     handleDia = const Nothing}
 
@@ -87,6 +95,7 @@ evalWithSoundnessHandler = ModalEvaluator {
     handleAnd = liftA2 (&&),
     handleOr = liftA2 (||),
     handleImp = liftA2 (<=),
+    handleIff = liftA2 (==),
     handleBox = (\x -> if x == Just False then Just False else Nothing),
     handleDia = (\x -> if x == Just True then Just True else Nothing)}
 
@@ -127,6 +136,7 @@ simplifyHandler =  ModalEvaluator {
     handleAnd = simplifyBinaryOperator And (&&),
     handleOr = simplifyBinaryOperator Or (||),
     handleImp = simplifyBinaryOperator Imp (<=),
+    handleIff = simplifyBinaryOperator Iff (==),
     handleBox = simplifyBox,
     handleDia = simplifyDia}
 
