@@ -16,25 +16,27 @@ data ModalFormula = Val {value :: Bool}
                   | Dia {contents :: ModalFormula}
 
 -- Syntactic Conveniences:
-infixr   5 %=
+infixr   4 %=
 (%=) = Iff
 
-infixr   6 %>
+infixr   5 %>
 (%>) = Imp
 
-infixr   7 %|
+infixl   6 %|
 (%|) = Or
 
-infixr   8 %^
+infixl   7 %^
 (%^) = And
 
-neg = Neg
+a = Var "a"
+b = Var "b"
+c = Var "c"
 x = Var "x"
 y = Var "y"
 z = Var "z"
 
-false = Val False
-true  = Val True
+f = Val False
+t = Val True
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator a = ModalEvaluator {
@@ -61,21 +63,16 @@ modalEval m = f where
   f (Box x) = (handleBox m) (f x)
   f (Dia x) = (handleDia m) (f x)
 
-
--- Pretty Printing
-modalFormulaPrettyPrinter :: ModalEvaluator String
-modalFormulaPrettyPrinter = ModalEvaluator {
-    handleVal = (\v -> if v then "T" else "F"),
-    handleVar = id,
-    handleNeg = (\x -> "(Neg "++x++")"),
-    handleAnd = (\x y -> "("++x++" %^ "++y++")"),
-    handleOr = (\x y -> "("++x++" %| "++y++")"),
-    handleImp = (\x y -> "("++x++" %> "++y++")"),
-    handleIff = (\x y -> "("++x++" %= "++y++")"),
-    handleBox = (\x -> "(Box "++ x ++ ")"),
-    handleDia = (\x -> "(Dia "++x++")")}
 instance Show ModalFormula where
-  show = modalEval modalFormulaPrettyPrinter
+  showsPrec _ (Val l) = showString $ if l then "T" else "F"
+  showsPrec _ (Var v) = showString v -- Make it uppercase?
+  showsPrec p (Neg x) = showParen (p > 8) $ showString "~ " . showsPrec 8 x
+  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " /\\ " . showsPrec 8 y
+  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " \\/ " . showsPrec 7 y
+  showsPrec p (Imp x y) = showParen (p > 5) $ showsPrec 6 x . showString " -> " . showsPrec 5 y
+  showsPrec p (Iff x y) = showParen (p > 4) $ showsPrec 5 x . showString " <-> " . showsPrec 4 y
+  showsPrec p (Box x) = showParen (p > 8) $ showString "[] " . showsPrec 8 x
+  showsPrec p (Dia x) = showParen (p > 8) $ showString "<> " . showsPrec 8 x
 
 -- Nesting Depth of Modal Operators
 maxModalDepthHandler :: ModalEvaluator Int
