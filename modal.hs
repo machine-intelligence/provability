@@ -69,7 +69,17 @@ modalFormulaPrettyPrinter = ModalEvaluator {
     handleDia = (\x -> "(Dia "++x++")")}
 instance Show ModalFormula where
   show = modalEval modalFormulaPrettyPrinter
- 
+
+-- Nesting Depth of Modal Operators
+maxModalDepthHandler :: ModalEvaluator Integer
+maxModalDepthHandler = ModalEvaluator {
+    handleVal = const 0, handleVar = const 0,
+    handleNeg = id,
+    handleAnd = max, handleOr = max, handleImp = max, handleIff = max,
+    handleBox = (1+), handleDia = (1+)}
+maxModalDepth :: ModalFormula -> Integer
+maxModalDepth = modalEval maxModalDepthHandler
+
 -- Propositional evaluation of the modal formula
 
 propositionalEvalHandler :: ModalEvaluator (Maybe Bool)
