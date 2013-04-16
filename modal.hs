@@ -6,7 +6,7 @@ data ModalFormula = Val {value :: Bool}
                   | Var {name :: String}
                   | Neg {contents :: ModalFormula}
                   | And {left, right :: ModalFormula}
-                  | Or {left, right :: ModalFormula}
+                  | Or  {left, right :: ModalFormula}
                   | Imp {left, right :: ModalFormula}
                   | Iff {left, right :: ModalFormula}
                   | Box {contents :: ModalFormula}
@@ -30,13 +30,16 @@ x = Var "x"
 y = Var "y"
 z = Var "z"
 
+false = Val False
+true  = Val True
+
 -- Data structure to be mapped across a formula.
 data ModalEvaluator a = ModalEvaluator {
     handleVal :: Bool -> a ,
     handleVar :: String -> a,
     handleNeg :: a -> a,
     handleAnd :: a -> a -> a,
-    handleOr :: a -> a -> a,
+    handleOr  :: a -> a -> a,
     handleImp :: a -> a -> a,
     handleIff :: a -> a -> a,
     handleBox :: a -> a,
@@ -49,7 +52,7 @@ modalEval m = f where
   f (Var s) = (handleVar m) s
   f (Neg x) = (handleNeg m) (f x)
   f (And x y) = (handleAnd m) (f x) (f y)
-  f (Or x y) = (handleOr m) (f x) (f y)
+  f (Or  x y) = (handleOr m) (f x) (f y)
   f (Imp x y) = (handleImp m) (f x) (f y)
   f (Iff x y) = (handleIff m) (f x) (f y)
   f (Box x) = (handleBox m) (f x)
@@ -89,7 +92,7 @@ propositionalEvalHandler = ModalEvaluator {
     handleVar = const Nothing,
     handleNeg = fmap not,
     handleAnd = liftA2 (&&),
-    handleOr = liftA2 (||),
+    handleOr  = liftA2 (||),
     handleImp = liftA2 (<=),
     handleIff = liftA2 (==),
     handleBox = const Nothing,
@@ -106,7 +109,7 @@ evalWithSoundnessHandler = ModalEvaluator {
     handleVar = const Nothing,
     handleNeg = fmap not,
     handleAnd = liftA2 (&&),
-    handleOr = liftA2 (||),
+    handleOr  = liftA2 (||),
     handleImp = liftA2 (<=),
     handleIff = liftA2 (==),
     handleBox = (\x -> if x == Just False then Just False else Nothing),
@@ -117,8 +120,8 @@ evalWithSoundness = modalEval evalWithSoundnessHandler
 
 -- How to simplify modal formulas:
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula -> ModalFormula
-mapFormulaOutput f formula =
-  g (f False) (f True) where
+mapFormulaOutput f formula = g (f False) (f True) 
+  where
     g True True = (Val True)
     g False False = (Val False)
     g False True = formula
@@ -155,7 +158,7 @@ simplifyHandler =  ModalEvaluator {
     handleVar = Var,
     handleNeg = simplifyNeg,
     handleAnd = simplifyBinaryOperator And (&&),
-    handleOr = simplifyBinaryOperator Or (||),
+    handleOr  = simplifyBinaryOperator Or (||),
     handleImp = simplifyBinaryOperator Imp (<=),
     handleIff = simplifyBinaryOperator Iff (==),
     handleBox = simplifyBox,
@@ -171,7 +174,7 @@ glEvalHandler = ModalEvaluator {
     handleVar = error "Variables are not supported in GLEval.",
     handleNeg = fmap not,
     handleAnd = zipWith (&&),
-    handleOr = zipWith (||),
+    handleOr  = zipWith (||),
     handleImp = zipWith (<=),
     handleIff = zipWith (==),
     handleBox = scanl (&&) True,
