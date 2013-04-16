@@ -71,13 +71,13 @@ instance Show ModalFormula where
   show = modalEval modalFormulaPrettyPrinter
 
 -- Nesting Depth of Modal Operators
-maxModalDepthHandler :: ModalEvaluator Integer
+maxModalDepthHandler :: ModalEvaluator Int
 maxModalDepthHandler = ModalEvaluator {
     handleVal = const 0, handleVar = const 0,
     handleNeg = id,
     handleAnd = max, handleOr = max, handleImp = max, handleIff = max,
     handleBox = (1+), handleDia = (1+)}
-maxModalDepth :: ModalFormula -> Integer
+maxModalDepth :: ModalFormula -> Int
 maxModalDepth = modalEval maxModalDepthHandler
 
 -- Propositional evaluation of the modal formula
@@ -162,3 +162,22 @@ simplifyHandler =  ModalEvaluator {
 
 simplify :: ModalFormula -> ModalFormula
 simplify = modalEval simplifyHandler
+
+-- GL Eval in standard model
+glEvalHandler :: ModalEvaluator [Bool]
+glEvalHandler = ModalEvaluator {
+    handleVal = repeat,
+    handleVar = error "Variables are not supported in GLEval.",
+    handleNeg = fmap not,
+    handleAnd = liftA2 (&&),
+    handleOr = liftA2 (||),
+    handleImp = liftA2 (<=),
+    handleIff = liftA2 (==),
+    handleBox = scanl (&&) True,
+    handleDia = scanl (||) False}
+
+glEval :: ModalFormula -> [Bool]
+glEval = modalEval glEvalHandler 
+
+glEvalStandard :: ModalFormula -> Bool
+glEvalStandard formula = (glEval formula) !! (maxModalDepth formula)
