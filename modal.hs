@@ -1,5 +1,6 @@
 import Control.Applicative
 import Data.List
+import Data.Maybe
 import Data.Map.Lazy (Map, (!))
 import qualified Data.Map.Lazy as M
 
@@ -227,3 +228,27 @@ generalFixpointGLEval formulaMap = evalMap
       handleBox = scanl (&&) True,
       handleDia = scanl (||) False
       }
+
+-- Finding the fixedpoints
+
+-- Check whether the length of a list is at least n without infinite looping.
+lengthAtLeast :: Int -> [a] -> Bool
+lengthAtLeast 0 _ = True
+lengthAtLeast _ [] = False
+lengthAtLeast n (x:xs) = lengthAtLeast (n-1) xs
+
+-- Find the fixpoint of a list, given a length of run after which we should conclude we found it.
+findFixpoint :: (Eq a) => Int -> [a] -> a
+findFixpoint n xs = (!!0) $ fromJust $ find (lengthAtLeast n) $ group xs
+
+
+-- Find the Fixpoint for a Modal formula
+findGLFixpoint :: String -> ModalFormula -> Bool
+findGLFixpoint var formula = findFixpoint (1+(maxModalDepth formula)) (fixpointGLEval var formula)
+
+-- Find the Fixpoint for a collection of Modal formulas
+findGeneralGLFixpoint :: Map String ModalFormula -> Map String Bool
+findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) (map level [0..]) where
+  level n = M.map (!!n) result
+  result = generalFixpointGLEval formulaMap
+  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
