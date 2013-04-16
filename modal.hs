@@ -1,8 +1,17 @@
-import Control.Applicative
+import Control.Applicative hiding ((<|>))
 import Data.List
 import Data.Maybe
 import Data.Map.Lazy (Map, (!))
 import qualified Data.Map.Lazy as M
+import Text.Parsec
+import Text.Parsec.Expr
+import Text.Parsec.Language
+import Text.Parsec.String
+import Text.Parsec.Token
+
+-- Example usage:
+-- findGeneralGLFixpoint $ M.fromList [("a",read "~ [] b"), ("b", read "[] (a -> [] ~ b)")]
+
 
 -- Modal Logic Formula data structure
 data ModalFormula = Val {value :: Bool}
@@ -67,12 +76,62 @@ instance Show ModalFormula where
   showsPrec _ (Val l) = showString $ if l then "T" else "F"
   showsPrec _ (Var v) = showString v -- Make it uppercase?
   showsPrec p (Neg x) = showParen (p > 8) $ showString "~ " . showsPrec 8 x
-  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " /\\ " . showsPrec 8 y
-  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " \\/ " . showsPrec 7 y
+  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " && " . showsPrec 8 y
+  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " || " . showsPrec 7 y
   showsPrec p (Imp x y) = showParen (p > 5) $ showsPrec 6 x . showString " -> " . showsPrec 5 y
   showsPrec p (Iff x y) = showParen (p > 4) $ showsPrec 5 x . showString " <-> " . showsPrec 4 y
   showsPrec p (Box x) = showParen (p > 8) $ showString "[] " . showsPrec 8 x
   showsPrec p (Dia x) = showParen (p > 8) $ showString "<> " . showsPrec 8 x
+
+--------------------------------------------------------------------------------
+  
+formulaParser :: Parser ModalFormula
+formulaParser = buildExpressionParser table term <?> "ModalFormula"
+  where
+    table = [ [prefix $ choice [ (m_reservedOp "~" >> return Neg)
+                               , (m_reservedOp "[]" >> return Box)
+                               , (m_reservedOp "<>" >> return Dia)
+                               ] ]
+            , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
+            , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
+            , [Infix (m_reservedOp "->" >> return Imp) AssocRight]
+            , [Infix (m_reservedOp "<->" >> return Iff) AssocRight]
+            ]
+            
+    term = m_parens formulaParser
+           <|> (m_reserved "T" >> return (Val True))
+           <|> (m_reserved "F" >> return (Val False))
+           <|> fmap Var m_identifier
+           
+    -- To work-around Parsec's limitation for prefix operators:
+    prefix  p = Prefix  . chainl1 p $ return (.)
+                       
+    TokenParser { parens = m_parens
+                , identifier = m_identifier
+                , reservedOp = m_reservedOp
+                , reserved = m_reserved
+                , semiSep1 = m_semiSep1
+                , whiteSpace = m_whiteSpace } = 
+      makeTokenParser emptyDef { commentStart = "{-"
+                               , commentEnd = "-}"
+                               , identStart = letter
+                               , identLetter = letter
+                               , opStart = oneOf "~-<>[]&|"
+                               , opLetter = oneOf "~-<>[]&|"
+                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>"]
+                               , reservedNames = ["T", "F"]
+                               , caseSensitive = False
+                               }
+
+instance Read ModalFormula where
+  readsPrec _ s = case parse (formulaParser <* eof) "" s of
+    Right result -> [(result,"")]
+    -- We could just return the remaining string, but Parsec gives
+    -- much nicer errors. So we ask it to consume the whole input and
+    -- fail if it fails.
+    Left err -> error $ show err
+  
+--------------------------------------------------------------------------------
 
 -- Nesting Depth of Modal Operators
 maxModalDepthHandler :: ModalEvaluator Int
