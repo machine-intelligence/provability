@@ -1,8 +1,8 @@
 import Control.Applicative hiding ((<|>))
 import Data.List
 import Data.Maybe
-import Data.Map.Lazy (Map, (!))
-import qualified Data.Map.Lazy as M
+import Data.Map (Map, (!))
+import qualified Data.Map as M
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
@@ -49,13 +49,19 @@ z = Var "z"
 ff = Val False
 tt = Val True
 
--- Operator like function that encodes "provable in S+Con^k(S)", where
--- "S" is the original system.
-boxk :: Int -> ModalFormula -> ModalFormula
-boxk k phi = Box (Neg (incon k) `Imp` phi)
+holdsk :: Int -> ModalFormula -> ModalFormula
+holdsk k phi = Neg (incon k) `Imp` phi
   where
     incon 0 = ff
     incon n = Box $ incon (n-1)
+
+-- Operator like function that encodes "provable in S+Con^k(S)", where
+-- "S" is the original system.
+boxk :: Int -> ModalFormula -> ModalFormula
+boxk k phi = Box (holdsk k phi)
+
+diak :: Int -> ModalFormula -> ModalFormula
+diak k phi = Dia (holdsk k phi)
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator a = ModalEvaluator {
@@ -105,7 +111,20 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , (m_reservedOp "[3]" >> return (boxk 3))
                                , (m_reservedOp "[4]" >> return (boxk 4))
                                , (m_reservedOp "[5]" >> return (boxk 5))
+                               , (m_reservedOp "[6]" >> return (boxk 6))
+                               , (m_reservedOp "[7]" >> return (boxk 7))
+                               , (m_reservedOp "[8]" >> return (boxk 8))
+                               , (m_reservedOp "[9]" >> return (boxk 9))
                                , (m_reservedOp "<>" >> return Dia)
+                               , (m_reservedOp "<1>" >> return (diak 1))
+                               , (m_reservedOp "<2>" >> return (diak 2))
+                               , (m_reservedOp "<3>" >> return (diak 3))
+                               , (m_reservedOp "<4>" >> return (diak 4))
+                               , (m_reservedOp "<5>" >> return (diak 5))
+                               , (m_reservedOp "<6>" >> return (diak 6))
+                               , (m_reservedOp "<7>" >> return (diak 7))
+                               , (m_reservedOp "<8>" >> return (diak 8))
+                               , (m_reservedOp "<9>" >> return (diak 9))
                                ] ]
             , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
             , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
@@ -132,8 +151,10 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , identStart = letter
                                , identLetter = letter
                                , opStart = oneOf "~-<[&|"
-                               , opLetter = oneOf "~-<>[]&|12345"
-                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>", "[1]", "[2]", "[3]", "[4]", "[5]"]
+                               , opLetter = oneOf "~-<>[]&|123456789"
+                               , reservedOpNames = [ "~", "&&", "||", "->", "<->", "[]", "<>"
+                                                   , "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]"
+                                                   , "<1>", "<2>", "<3>", "<4>", "<5>", "<6>", "<7>", "<8>", "<9>" ]
                                , reservedNames = ["T", "F"]
                                , caseSensitive = False
                                }
