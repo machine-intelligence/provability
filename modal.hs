@@ -362,6 +362,16 @@ findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) results wher
 --  - The variable "B" represents whether the opponent cooperates with us.
 
 -- Some Bots:
+
+-- isLegalBot: Make sure all variables are inside modal operators.
+isLegalBot :: ModalFormula -> Bool
+isLegalBot = modalEval ModalEvaluator {
+  handleVar = const False,
+  handleVal = const True,
+  handleNeg = id,
+  handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
+  handleBox = const True, handleDia = const True}
+
 coopBot = tt
 defectBot = ff
 fairBot = read "[] b" :: ModalFormula
