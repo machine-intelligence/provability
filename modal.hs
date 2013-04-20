@@ -106,6 +106,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
   where
     table = [ [prefix $ choice [ (m_reservedOp "~" >> return Neg)
                                , (m_reservedOp "[]" >> return Box)
+                               , (m_reservedOp "[0]" >> return Box)
                                , (m_reservedOp "[1]" >> return (boxk 1))
                                , (m_reservedOp "[2]" >> return (boxk 2))
                                , (m_reservedOp "[3]" >> return (boxk 3))
@@ -116,6 +117,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , (m_reservedOp "[8]" >> return (boxk 8))
                                , (m_reservedOp "[9]" >> return (boxk 9))
                                , (m_reservedOp "<>" >> return Dia)
+                               , (m_reservedOp "<0>" >> return Dia)
                                , (m_reservedOp "<1>" >> return (diak 1))
                                , (m_reservedOp "<2>" >> return (diak 2))
                                , (m_reservedOp "<3>" >> return (diak 3))
