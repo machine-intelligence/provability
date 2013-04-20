@@ -332,4 +332,33 @@ findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) results wher
   results = generalGLEvalSeq formulaMap
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
 
+-- Bots
+-- A bot is represented as a modal formula in which:
+--  - The box represents provability
+--  - The variable "A" represents whether this bot cooperates against its opponent
+--  - The variable "B" represents whether the opponent cooperates with us.
 
+-- Some Bots:
+coopBot = tt
+defectBot = ff
+fairBot = read "[] b" :: ModalFormula
+reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
+magicBot = read "[] (([] a -> b) && ([] (~a) -> ~b))" :: ModalFormula
+magicBot1 = read "[] (([1] a -> b) && ([1] (~a) -> ~b))" :: ModalFormula
+waitBot = read "~ [] F && [1] b " :: ModalFormula
+
+-- How bots compete:
+mapVars f = modalEval ModalEvaluator {
+    handleVar = Var . f,
+    handleVal = Val, handleNeg = Neg,
+    handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
+    handleBox = Box, handleDia = Dia}
+
+flipBot :: ModalFormula -> ModalFormula
+flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
+
+competition :: ModalFormula -> ModalFormula -> Map String ModalFormula
+competition bot1 bot2 = M.fromList [("a", bot1), ("b", flipBot bot2)]
+
+compete :: ModalFormula -> ModalFormula -> Map String Bool
+compete bot1 bot2 = findGeneralGLFixpoint $ competition bot1 bot2
