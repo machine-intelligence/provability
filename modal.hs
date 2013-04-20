@@ -384,6 +384,27 @@ reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
 magicBot = read "[1] (([] a -> b) && ([] ~a -> ~b))" :: ModalFormula
 waitBot = read "~ [] F && [1] b " :: ModalFormula
 
+-- all the bots
+unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
+unaryCombinations lists f = map (map f) lists
+
+binaryCombinations :: [[a]] -> (a -> a -> a) -> [[a]]
+binaryCombinations lists f = map level [1..] where
+  level n = let r = (take n lists) in concat $ zipWith (liftA2 f) r (reverse r)
+
+allFormulasTiered names = formulas where
+  formulas = atoms : compounds
+  atoms = tt : ff : map Var names
+  a1 = [Neg, Box, Dia] -- arity 1 connectors
+  a2 = [And, Or, Imp, Iff] -- arity 2 connectors
+  compounds = merge (map (unaryCombinations formulas) a1 ++ map (binaryCombinations formulas) a2)
+  merge :: [[[a]]] -> [[a]]
+  merge = foldl (zipWith (++)) (repeat [])
+
+allFormulas = concat . allFormulasTiered
+
+allBots = filter isLegalBot (allFormulas ["a", "b"])
+
 -- How bots compete:
 mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
 
@@ -393,5 +414,13 @@ flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s)
 competition :: ModalFormula -> ModalFormula -> Map String ModalFormula
 competition bot1 bot2 = M.fromList [("a", bot1), ("b", flipBot bot2)]
 
-compete :: ModalFormula -> ModalFormula -> Map String Bool
-compete bot1 bot2 = findGeneralGLFixpoint $ competition bot1 bot2
+compete :: ModalFormula -> ModalFormula -> (Bool, Bool)
+compete bot1 bot2 = simplifyOutput $ findGeneralGLFixpoint $ competition bot1 bot2 where
+  simplifyOutput map = (map ! "a", map ! "b")
+
+isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
+isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
+
+-- Sanity checks
+
+checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
