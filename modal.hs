@@ -75,6 +75,11 @@ data ModalEvaluator a = ModalEvaluator {
     handleBox :: a -> a,
     handleDia :: a -> a}
 
+idModalEvaluator = ModalEvaluator {
+  handleVar = Var, handleVal = Val, handleNeg = Neg,
+  handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
+  handleBox = Box, handleDia = Dia }
+
 -- And how to use it to map:
 modalEval :: ModalEvaluator a -> ModalFormula -> a
 modalEval m = f where
@@ -370,11 +375,7 @@ magicBot = read "[1] (([] a -> b) && ([] ~a -> ~b))" :: ModalFormula
 waitBot = read "~ [] F && [1] b " :: ModalFormula
 
 -- How bots compete:
-mapVars f = modalEval ModalEvaluator {
-    handleVar = Var . f,
-    handleVal = Val, handleNeg = Neg,
-    handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
-    handleBox = Box, handleDia = Dia}
+mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
 
 flipBot :: ModalFormula -> ModalFormula
 flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
