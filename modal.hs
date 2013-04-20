@@ -11,6 +11,8 @@ import Text.Parsec.Token
 
 -- Example usage:
 -- findGeneralGLFixpoint $ M.fromList [("a",read "~ [] b"), ("b", read "[] (a -> [] ~ b)")]
+-- Alternatively:
+-- findGeneralGLFixpoint $ makeEquivs [("a", "~ [] b"), ("b", "[] (a -> [] ~ b)")]
 
 
 -- Modal Logic Formula data structure
@@ -314,14 +316,18 @@ findGLFixpoint :: String -> ModalFormula -> Bool
 findGLFixpoint var formula = findFixpoint (1+(maxModalDepth formula)) (fixpointGLEval var formula)
 
 -- Find the Fixpoint for a collection of Modal formulas
-findGeneralGLFixpoint :: Map String ModalFormula -> Map String Bool
-findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) (map level [0..]) where
-  level n = M.map (!!n) result
-  result = generalFixpointGLEval formulaMap
-  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+makeEquivs :: [(String, String)] -> Map String ModalFormula
+makeEquivs = M.fromList . map (\(v, f) -> (v, read f))
 
 generalGLEvalSeq :: Map String ModalFormula -> [Map String Bool]
 generalGLEvalSeq formulaMap = map level [0..] 
   where
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
+
+findGeneralGLFixpoint :: Map String ModalFormula -> Map String Bool
+findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) results where
+  results = generalGLEvalSeq formulaMap
+  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+
+
