@@ -366,8 +366,7 @@ coopBot = tt
 defectBot = ff
 fairBot = read "[] b" :: ModalFormula
 reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
-magicBot = read "[] (([] a -> b) && ([] (~a) -> ~b))" :: ModalFormula
-magicBot1 = read "[] (([1] a -> b) && ([1] (~a) -> ~b))" :: ModalFormula
+magicBot = read "[1] (([] a -> b) && ([] ~a -> ~b))" :: ModalFormula
 waitBot = read "~ [] F && [1] b " :: ModalFormula
 
 -- How bots compete:
