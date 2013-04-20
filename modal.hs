@@ -44,8 +44,16 @@ x = Var "x"
 y = Var "y"
 z = Var "z"
 
-f = Val False
-t = Val True
+ff = Val False
+tt = Val True
+
+-- Operator like function that encodes "provable in S+Con^k(S)", where
+-- "S" is the original system.
+boxk :: Int -> ModalFormula -> ModalFormula
+boxk k phi = Box (Neg (incon k) `Imp` phi)
+  where
+    incon 0 = ff
+    incon n = Box $ incon (n-1)
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator a = ModalEvaluator {
@@ -90,6 +98,9 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
   where
     table = [ [prefix $ choice [ (m_reservedOp "~" >> return Neg)
                                , (m_reservedOp "[]" >> return Box)
+                               , (m_reservedOp "[1]" >> return (boxk 1))
+                               , (m_reservedOp "[2]" >> return (boxk 2))
+                               , (m_reservedOp "[3]" >> return (boxk 3))
                                , (m_reservedOp "<>" >> return Dia)
                                ] ]
             , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
@@ -116,9 +127,9 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , commentEnd = "-}"
                                , identStart = letter
                                , identLetter = letter
-                               , opStart = oneOf "~-<>[]&|"
-                               , opLetter = oneOf "~-<>[]&|"
-                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>"]
+                               , opStart = oneOf "~-<[&|"
+                               , opLetter = oneOf "~-<>[]&|1234"
+                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>", "[1]", "[2]", "[3]"]
                                , reservedNames = ["T", "F"]
                                , caseSensitive = False
                                }
@@ -308,3 +319,9 @@ findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) (map level [
   level n = M.map (!!n) result
   result = generalFixpointGLEval formulaMap
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+
+generalGLEvalSeq :: Map String ModalFormula -> [Map String Bool]
+generalGLEvalSeq formulaMap = map level [0..] 
+  where
+    level n = M.map (!!n) result
+    result = generalFixpointGLEval formulaMap
