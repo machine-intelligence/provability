@@ -101,6 +101,8 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , (m_reservedOp "[1]" >> return (boxk 1))
                                , (m_reservedOp "[2]" >> return (boxk 2))
                                , (m_reservedOp "[3]" >> return (boxk 3))
+                               , (m_reservedOp "[4]" >> return (boxk 4))
+                               , (m_reservedOp "[5]" >> return (boxk 5))
                                , (m_reservedOp "<>" >> return Dia)
                                ] ]
             , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
@@ -128,8 +130,8 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , identStart = letter
                                , identLetter = letter
                                , opStart = oneOf "~-<[&|"
-                               , opLetter = oneOf "~-<>[]&|1234"
-                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>", "[1]", "[2]", "[3]"]
+                               , opLetter = oneOf "~-<>[]&|12345"
+                               , reservedOpNames = ["~", "&&", "||", "->", "<->", "[]", "<>", "[1]", "[2]", "[3]", "[4]", "[5]"]
                                , reservedNames = ["T", "F"]
                                , caseSensitive = False
                                }
