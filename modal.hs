@@ -1,8 +1,8 @@
 import Control.Applicative hiding ((<|>))
 import Data.List
 import Data.Maybe
-import Data.Map.Lazy (Map, (!))
-import qualified Data.Map.Lazy as M
+import Data.Map (Map, (!))
+import qualified Data.Map as M
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
