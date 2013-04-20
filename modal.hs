@@ -25,6 +25,7 @@ data ModalFormula = Val {value :: Bool}
                   | Iff {left, right :: ModalFormula}
                   | Box {contents :: ModalFormula}
                   | Dia {contents :: ModalFormula}
+                  deriving (Eq, Ord)
 
 -- Syntactic Conveniences:
 infixr   4 %=
@@ -394,7 +395,7 @@ binaryCombinations lists f = map level [1..] where
 
 allFormulasTiered names = formulas where
   formulas = atoms : compounds
-  atoms = tt : ff : map Var names
+  atoms = map Var names -- we don't include true and false because they bloat the space without adding expressive power
   a1 = [Neg, Box, Dia] -- arity 1 connectors
   a2 = [And, Or, Imp, Iff] -- arity 2 connectors
   compounds = merge (map (unaryCombinations formulas) a1 ++ map (binaryCombinations formulas) a2)
@@ -418,9 +419,30 @@ compete :: ModalFormula -> ModalFormula -> (Bool, Bool)
 compete bot1 bot2 = simplifyOutput $ findGeneralGLFixpoint $ competition bot1 bot2 where
   simplifyOutput map = (map ! "a", map ! "b")
 
-isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
-isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
 
 -- Sanity checks
 
+isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
+isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
+
+-- Does any bot ever sucker punch this one?
+checkSucker :: ModalFormula -> Int -> Maybe ModalFormula
 checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
+
+
+isMutualCoop :: ModalFormula -> ModalFormula -> Bool
+isMutualCoop bot1 bot2 = compete bot1 bot2 == (True, True)
+
+allPairs :: [a] -> [(a,a)]
+allPairs l = [(l!!i, l!!j) | i <- [0..],  j<-[0..i]]
+
+mutualCooperations :: [(ModalFormula, ModalFormula)]
+mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
+
+niceBots :: Int -> [ModalFormula]
+niceBots n = nub $ sort [f c | c <- take n mutualCooperations, f <- [fst, snd]]
+
+-- Did a niceBot ever defect against us?
+checkNiceBots :: ModalFormula -> Int -> Maybe ModalFormula
+checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
+  defectsAgainstMe bot' = snd (compete bot bot') == False
