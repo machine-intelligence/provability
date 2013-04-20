@@ -140,6 +140,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
             ]
             
     term = m_parens formulaParser
+           <|> m_braces formulaParser
            <|> (m_reserved "T" >> return (Val True))
            <|> (m_reserved "F" >> return (Val False))
            <|> fmap Var m_identifier
@@ -148,6 +149,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
     prefix  p = Prefix  . chainl1 p $ return (.)
                        
     TokenParser { parens = m_parens
+                , braces = m_braces
                 , identifier = m_identifier
                 , reservedOp = m_reservedOp
                 , reserved = m_reserved
