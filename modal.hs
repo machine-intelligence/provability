@@ -424,8 +424,12 @@ compete bot1 bot2 = simplifyOutput $ findGeneralGLFixpoint $ competition bot1 bo
 
 
 -- Sanity checks
+
 allPairs :: [a] -> [(a,a)]
-allPairs l = [(l!!i, l!!j) | i <- [0..],  j<-[0..i]]
+allPairs l = [ (a,b) | (a,bs) <- zip l (tail $ inits l), b <- bs ]
+
+allPairsSym :: [a] -> [(a,a)]
+allPairsSym l = [ x | ini <- inits l, x <- zip ini (reverse ini) ]
 
 isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
 isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
@@ -437,13 +441,22 @@ mutualCooperations :: [(ModalFormula, ModalFormula)]
 mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
 
 suckerPayoffs :: [(ModalFormula, ModalFormula)]
-suckerPayoffs = filter (uncurry isSuckerPunched) (allPairs allBots)
+suckerPayoffs = filter (uncurry isSuckerPunched) (allPairsSym allBots)
+
+sortUniq :: Ord a => [a] -> [a]
+sortUniq l = case sort l of
+  [] -> []
+  (h:t) -> snub h t
+    where
+      snub x [] = [x]
+      snub x (y:ys) | x /= y    = x : snub y ys
+                    | otherwise = snub x ys
 
 niceBots :: Int -> [ModalFormula]
-niceBots n = nub $ sort [f c | c <- take n mutualCooperations, f <- [fst, snd]]
+niceBots n = sortUniq [f c | c <- take n mutualCooperations, f <- [fst, snd]]
 
 exploitableBots :: Int -> [ModalFormula]
-exploitableBots n = nub $ sort [fst c | c <- take n suckerPayoffs]
+exploitableBots n = sortUniq [fst c | c <- take n suckerPayoffs]
 
 -- Does any bot ever sucker punch this one?
 checkSucker :: ModalFormula -> Int -> Maybe ModalFormula
