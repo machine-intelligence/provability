@@ -442,8 +442,8 @@ suckerPayoffs = filter (uncurry isSuckerPunched) (allPairs allBots)
 niceBots :: Int -> [ModalFormula]
 niceBots n = nub $ sort [f c | c <- take n mutualCooperations, f <- [fst, snd]]
 
-suckerBots :: Int -> [ModalFormula]
-suckerBots n = nub $ sort [fst c | c <- take n suckerPayoffs]
+exploitableBots :: Int -> [ModalFormula]
+exploitableBots n = nub $ sort [fst c | c <- take n suckerPayoffs]
 
 -- Does any bot ever sucker punch this one?
 checkSucker :: ModalFormula -> Int -> Maybe ModalFormula
@@ -456,7 +456,6 @@ checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
 
 -- Did this bot ever fail to exploit a suckerBot?
 
-checkSuckerBots :: ModalFormula -> Int -> Maybe ModalFormula
-
-checkSuckerBots bot n = find notSuckered (suckerBots n) where
+checkExploitableBots :: ModalFormula -> Int -> Maybe ModalFormula
+checkExploitableBots bot n = find notSuckered (exploitableBots n) where
   notSuckered bot' = not $ isSuckerPunched bot' bot 
