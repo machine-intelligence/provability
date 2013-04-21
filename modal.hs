@@ -384,9 +384,10 @@ coopBot = tt
 defectBot = ff
 fairBot = read "[] b" :: ModalFormula
 reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
-magicBot = read "[1] (([] a -> b) && ([] ~a -> ~b))" :: ModalFormula
+magicBot = read "[1]([] a -> b)" :: ModalFormula
 waitBot = read "~ [] F && [1] b " :: ModalFormula
 waitBot2 = read "~ ([] a) && ([] ~a || [1] b)" :: ModalFormula
+almostMagicBot = read "~ [1]([] ~ a -> b) && [2] b" :: ModalFormula
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
