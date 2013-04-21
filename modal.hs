@@ -421,28 +421,39 @@ compete bot1 bot2 = simplifyOutput $ findGeneralGLFixpoint $ competition bot1 bo
 
 
 -- Sanity checks
+allPairs :: [a] -> [(a,a)]
+allPairs l = [(l!!i, l!!j) | i <- [0..],  j<-[0..i]]
 
 isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
 isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
+
+isMutualCoop :: ModalFormula -> ModalFormula -> Bool
+isMutualCoop bot1 bot2 = compete bot1 bot2 == (True, True)
+
+mutualCooperations :: [(ModalFormula, ModalFormula)]
+mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
+
+suckerPayoffs :: [(ModalFormula, ModalFormula)]
+suckerPayoffs = filter (uncurry isSuckerPunched) (allPairs allBots)
+
+niceBots :: Int -> [ModalFormula]
+niceBots n = nub $ sort [f c | c <- take n mutualCooperations, f <- [fst, snd]]
+
+suckerBots :: Int -> [ModalFormula]
+suckerBots n = nub $ sort [fst c | c <- take n suckerPayoffs]
 
 -- Does any bot ever sucker punch this one?
 checkSucker :: ModalFormula -> Int -> Maybe ModalFormula
 checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
 
-
-isMutualCoop :: ModalFormula -> ModalFormula -> Bool
-isMutualCoop bot1 bot2 = compete bot1 bot2 == (True, True)
-
-allPairs :: [a] -> [(a,a)]
-allPairs l = [(l!!i, l!!j) | i <- [0..],  j<-[0..i]]
-
-mutualCooperations :: [(ModalFormula, ModalFormula)]
-mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
-
-niceBots :: Int -> [ModalFormula]
-niceBots n = nub $ sort [f c | c <- take n mutualCooperations, f <- [fst, snd]]
-
 -- Did a niceBot ever defect against us?
 checkNiceBots :: ModalFormula -> Int -> Maybe ModalFormula
 checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
   defectsAgainstMe bot' = snd (compete bot bot') == False
+
+-- Did this bot ever fail to exploit a suckerBot?
+
+checkSuckerBots :: ModalFormula -> Int -> Maybe ModalFormula
+
+checkSuckerBots bot n = find notSuckered (suckerBots n) where
+  notSuckered bot' = not $ isSuckerPunched bot' bot 
