@@ -383,6 +383,7 @@ isLegalBot = modalEval ModalEvaluator {
 coopBot = tt
 defectBot = ff
 fairBot = read "[] b" :: ModalFormula
+toughButFairBot = read "[] b || (<> b && [1] b) || (<1> b && [2] b)" :: ModalFormula
 reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
 magicBot = read "[1]([] a -> b)" :: ModalFormula
 waitBot = read "~ [] F && [1] b " :: ModalFormula
