@@ -27,6 +27,8 @@ data ModalFormula = Val {value :: Bool}
                   | Dia {contents :: ModalFormula}
                   deriving (Eq, Ord)
 
+data ModalAgent = MA { agentFormula :: ModalFormula, helpers :: Map String ModalAgent }
+
 -- Syntactic Conveniences:
 infixr   4 %=
 (%=) = Iff
@@ -380,15 +382,22 @@ isLegalBot = modalEval ModalEvaluator {
   handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
   handleBox = const True, handleDia = const True}
 
-coopBot = tt
-defectBot = ff
-fairBot = read "[] b" :: ModalFormula
-toughButFairBot = read "[] b || (<> b && [1] b) || (<1> b && [2] b)" :: ModalFormula
-reverseFairBot = read "(~ [] ~ b) && [] b" :: ModalFormula
-magicBot = read "[1]([] a -> b)" :: ModalFormula
-waitBot = read "~ [] F && [1] b " :: ModalFormula
-waitBot2 = read "~ ([] a) && ([] ~a || [1] b)" :: ModalFormula
-almostMagicBot = read "~ [1]([] ~ a -> b) && [2] b" :: ModalFormula
+simpleAgent :: ModalFormula -> ModalAgent
+simpleAgent formula = MA formula (M.empty)
+
+coopBot = simpleAgent tt
+defectBot = simpleAgent ff
+fairBot = simpleAgent $ read "[] b"
+toughButFairBot = simpleAgent $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
+reverseFairBot = simpleAgent $ read "(~ [] ~ b) && [] b"
+magicBot = simpleAgent $ read "[1]([] a -> b)"
+waitBot = simpleAgent $ read "~ [] F && [1] b "
+waitBot2 = simpleAgent $ read "~ ([] a) && ([] ~a || [1] b)"
+almostMagicBot = simpleAgent $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
+simpleMagicBot = simpleAgent $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
+
+trollBot = MA (read "[] coop") (M.fromList [("coop", coopBot)])
+hungryTrollBot = MA (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
@@ -417,13 +426,32 @@ mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
 flipBot :: ModalFormula -> ModalFormula
 flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
 
-competition :: ModalFormula -> ModalFormula -> Map String ModalFormula
-competition bot1 bot2 = M.fromList [("a", bot1), ("b", flipBot bot2)]
+competition :: ModalAgent -> ModalAgent -> Map String ModalFormula
+competition a1 a2 = namedCompetition ("a", a1) ("b", a2)
+  where
+    ncat n1 n2 = n1 ++ "_" ++ n2
+    
+    namedCompetition na1@(n1, (MA a1 helpers1)) na2@(n2, (MA a2 helpers2)) = top `M.union` left `M.union` right
 
-compete :: ModalFormula -> ModalFormula -> (Bool, Bool)
-compete bot1 bot2 = simplifyOutput $ findGeneralGLFixpoint $ competition bot1 bot2 where
-  simplifyOutput map = (map ! "a", map ! "b")
+      where
+        top = M.fromList [ (ncat n1 n2, rename a1 n1 n2), (ncat n2 n1, rename a2 n2 n1) ]
+    
+        left  = M.unions [ namedCompetition na2 nha1 | nha1 <- M.toList helpers1 ]
+        right = M.unions [ namedCompetition na1 nha2 | nha2 <- M.toList helpers2 ]
+    
+        rename agentFormula myName oppName = mapVars f agentFormula
+          where
+            f n | n == "a"  = ncat myName oppName
+                | n == "b"  = ncat oppName myName
+                | otherwise = ncat oppName n
+  
+compete :: ModalAgent -> ModalAgent -> (Bool, Bool)
+compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition agent1 agent2 
+  where
+    simplifyOutput map = (map ! "a_b", map ! "b_a")
 
+simpleCompete :: ModalFormula -> ModalFormula -> (Bool, Bool)
+simpleCompete f1 f2 = compete (simpleAgent f1) (simpleAgent f2)
 
 -- Sanity checks
 
@@ -434,10 +462,10 @@ allPairsSym :: [a] -> [(a,a)]
 allPairsSym l = [ x | ini <- inits l, x <- zip ini (reverse ini) ]
 
 isSuckerPunched :: ModalFormula -> ModalFormula -> Bool
-isSuckerPunched bot1 bot2 = compete bot1 bot2 == (True, False)
+isSuckerPunched bot1 bot2 = simpleCompete bot1 bot2 == (True, False)
 
 isMutualCoop :: ModalFormula -> ModalFormula -> Bool
-isMutualCoop bot1 bot2 = compete bot1 bot2 == (True, True)
+isMutualCoop bot1 bot2 = simpleCompete bot1 bot2 == (True, True)
 
 mutualCooperations :: [(ModalFormula, ModalFormula)]
 mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
@@ -467,7 +495,7 @@ checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
 -- Did a niceBot ever defect against us?
 checkNiceBots :: ModalFormula -> Int -> Maybe ModalFormula
 checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
-  defectsAgainstMe bot' = snd (compete bot bot') == False
+  defectsAgainstMe bot' = snd (simpleCompete bot bot') == False
 
 -- Did this bot ever fail to exploit a suckerBot?
 
