@@ -433,10 +433,13 @@ mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
 flipBot :: ModalFormula -> ModalFormula
 flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
 
+competitionNameCat :: String -> String -> String
+competitionNameCat name1 name2 = name1 ++ "_vs_" ++ name2
+
 competitionSloppyNames :: ModalAgent -> ModalAgent -> Map String ModalFormula
 competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left `M.union` right
   where
-    ncat n1 n2 = n1 ++ "_" ++ n2
+    ncat = competitionNameCat
     
     top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
     
@@ -456,7 +459,7 @@ competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2)
   | n1 == n2 && na1 /= na2 = error "Different agents competing with same names"
   | otherwise = top `M.union` left `M.union` right
   where
-    ncat n1 n2 = n1 ++ "_" ++ n2
+    ncat = competitionNameCat
     scat n sn = n ++ "." ++ sn    
     
     top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
@@ -477,7 +480,7 @@ compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition age
   where
     n1 = aname agent1
     n2 = aname agent2
-    ncat n1 n2 = n1 ++ "_" ++ n2
+    ncat = competitionNameCat
     simplifyOutput map = (map ! (ncat n1 n2), map ! (ncat n2 n1))
 
 simpleCompete :: ModalFormula -> ModalFormula -> (Bool, Bool)
