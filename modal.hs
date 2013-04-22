@@ -393,6 +393,8 @@ coopBot = simpleNamedAgent "coop" tt
 defectBot = simpleNamedAgent "dbot" ff
 fairBot = simpleNamedAgent "fair" $ read "[] b"
 fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
+fairBot2 = simpleNamedAgent "fair2" $ read "[2] b"
+fairBot3 = simpleNamedAgent "fair3" $ read "[3] b"
 toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
 reverseFairBot = simpleNamedAgent "rfair" $ read "(~ [] ~ b) && [] b"
 magicBot = simpleNamedAgent "magic" $ read "[1]([] a -> b)"
@@ -404,7 +406,8 @@ simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves ex
 trollBot = MA "troll" (read "[] coop") (M.fromList [("coop", coopBot)])
 hungryTrollBot = MA "TROLL" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
-checkBot = MA "check" (read "[1] ~ dbot && [2] b") (M.fromList [("dbot", defectBot)])
+-- Cooperates with toughButFairBot at this level
+checkBot = MA "check" (read "[3] (~ dbot && b)") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
@@ -443,8 +446,8 @@ competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.
     
     top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
     
-    left  = M.unions [ competition na2 (rename nha1) | nha1 <- M.toList helpers1 ]
-    right = M.unions [ competition na1 (rename nha2) | nha2 <- M.toList helpers2 ]
+    left  = M.unions [ competitionSloppyNames na2 (rename nha1) | nha1 <- M.toList helpers1 ]
+    right = M.unions [ competitionSloppyNames na1 (rename nha2) | nha2 <- M.toList helpers2 ]
     
     rename (name,agent) = agent { aname = name }
 
