@@ -27,7 +27,8 @@ data ModalFormula = Val {value :: Bool}
                   | Dia {contents :: ModalFormula}
                   deriving (Eq, Ord)
 
-data ModalAgent = MA { agentFormula :: ModalFormula, helpers :: Map String ModalAgent }
+data ModalAgent = MA { aname :: String, agentFormula :: ModalFormula, helpers :: Map String ModalAgent }
+                  deriving Show
 
 -- Syntactic Conveniences:
 infixr   4 %=
@@ -386,24 +387,24 @@ simpleAgent :: ModalFormula -> ModalAgent
 simpleAgent formula = MA "X" formula (M.empty) -- TODO(klao): hash the formula into the name
 
 simpleNamedAgent :: String -> ModalFormula -> ModalAgent
-simpleAgent formula = MA formula (M.empty)
+simpleNamedAgent name formula = MA name formula (M.empty)
 
-coopBot = simpleAgent tt
-defectBot = simpleAgent ff
-fairBot = simpleAgent $ read "[] b"
-fairBot1 = simpleAgent $ read "[1] b"
-toughButFairBot = simpleAgent $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
-reverseFairBot = simpleAgent $ read "(~ [] ~ b) && [] b"
-magicBot = simpleAgent $ read "[1]([] a -> b)"
-waitBot = simpleAgent $ read "~ [] F && [1] b "
-waitBot2 = simpleAgent $ read "~ ([] a) && ([] ~a || [1] b)"
-almostMagicBot = simpleAgent $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
-simpleMagicBot = simpleAgent $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
+coopBot = simpleNamedAgent "coop" tt
+defectBot = simpleNamedAgent "dbot" ff
+fairBot = simpleNamedAgent "fair" $ read "[] b"
+fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
+toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
+reverseFairBot = simpleNamedAgent "rfair" $ read "(~ [] ~ b) && [] b"
+magicBot = simpleNamedAgent "magic" $ read "[1]([] a -> b)"
+waitBot = simpleNamedAgent "wait" $ read "~ [] F && [1] b "
+waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
+almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
+simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
 
-trollBot = MA (read "[] coop") (M.fromList [("coop", coopBot)])
-hungryTrollBot = MA (read "[] dbot") (M.fromList [("dbot", defectBot)])
+trollBot = MA "troll" (read "[] coop") (M.fromList [("coop", coopBot)])
+hungryTrollBot = MA "TROLL" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
-checkBot = MA (read "~ [] dbot && [1] b") (M.fromList [("dbot", defectBot)])
+checkBot = MA "check" (read "~ [] dbot && [1] b") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
@@ -433,23 +434,22 @@ flipBot :: ModalFormula -> ModalFormula
 flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
 
 competition :: ModalAgent -> ModalAgent -> Map String ModalFormula
-competition a1 a2 = namedCompetition ("a", a1) ("b", a2)
+competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left `M.union` right
   where
     ncat n1 n2 = n1 ++ "_" ++ n2
+        
+    top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
     
-    namedCompetition na1@(n1, (MA a1 helpers1)) na2@(n2, (MA a2 helpers2)) = top `M.union` left `M.union` right
+    left  = M.unions [ competition na2 (rename nha1) | nha1 <- M.toList helpers1 ]
+    right = M.unions [ competition na1 (rename nha2) | nha2 <- M.toList helpers2 ]
+    
+    rename (name,agent) = agent { aname = name }
 
+    renameFormula agentFormula myName oppName = mapVars f agentFormula
       where
-        top = M.fromList [ (ncat n1 n2, rename a1 n1 n2), (ncat n2 n1, rename a2 n2 n1) ]
-    
-        left  = M.unions [ namedCompetition na2 nha1 | nha1 <- M.toList helpers1 ]
-        right = M.unions [ namedCompetition na1 nha2 | nha2 <- M.toList helpers2 ]
-    
-        rename agentFormula myName oppName = mapVars f agentFormula
-          where
-            f n | n == "a"  = ncat myName oppName
-                | n == "b"  = ncat oppName myName
-                | otherwise = ncat oppName n
+        f n | n == "a"  = ncat myName oppName
+            | n == "b"  = ncat oppName myName
+            | otherwise = ncat oppName n
   
 compete :: ModalAgent -> ModalAgent -> (Bool, Bool)
 compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition agent1 agent2 
