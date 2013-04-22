@@ -28,7 +28,7 @@ data ModalFormula = Val {value :: Bool}
                   deriving (Eq, Ord)
 
 data ModalAgent = MA { aname :: String, agentFormula :: ModalFormula, helpers :: Map String ModalAgent }
-                  deriving Show
+                  deriving (Eq,Show)
 
 -- Syntactic Conveniences:
 infixr   4 %=
@@ -404,7 +404,7 @@ simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves ex
 trollBot = MA "troll" (read "[] coop") (M.fromList [("coop", coopBot)])
 hungryTrollBot = MA "TROLL" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
-checkBot = MA "check" (read "~ [] dbot && [1] b") (M.fromList [("dbot", defectBot)])
+checkBot = MA "check" (read "[1] ~ dbot && [2] b") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
@@ -433,11 +433,11 @@ mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
 flipBot :: ModalFormula -> ModalFormula
 flipBot = mapVars (\s -> if s == "a" then "b" else (if s == "b" then "a" else s))
 
-competition :: ModalAgent -> ModalAgent -> Map String ModalFormula
-competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left `M.union` right
+competitionSloppyNames :: ModalAgent -> ModalAgent -> Map String ModalFormula
+competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left `M.union` right
   where
     ncat n1 n2 = n1 ++ "_" ++ n2
-        
+    
     top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
     
     left  = M.unions [ competition na2 (rename nha1) | nha1 <- M.toList helpers1 ]
@@ -451,10 +451,34 @@ competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left
             | n == "b"  = ncat oppName myName
             | otherwise = ncat oppName n
   
+competition :: ModalAgent -> ModalAgent -> Map String ModalFormula
+competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) 
+  | n1 == n2 && na1 /= na2 = error "Different agents competing with same names"
+  | otherwise = top `M.union` left `M.union` right
+  where
+    ncat n1 n2 = n1 ++ "_" ++ n2
+    scat n sn = n ++ "." ++ sn    
+    
+    top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
+    
+    left  = M.unions [ competition na2 (rename n1 nha1) | nha1 <- M.toList helpers1 ]
+    right = M.unions [ competition na1 (rename n2 nha2) | nha2 <- M.toList helpers2 ]
+    
+    rename superName (name,agent) = agent { aname = scat superName name }
+
+    renameFormula agentFormula myName oppName = mapVars f agentFormula
+      where
+        f n | n == "a"  = ncat myName oppName
+            | n == "b"  = ncat oppName myName
+            | otherwise = ncat oppName (scat myName n)
+  
 compete :: ModalAgent -> ModalAgent -> (Bool, Bool)
 compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition agent1 agent2 
   where
-    simplifyOutput map = (map ! "a_b", map ! "b_a")
+    n1 = aname agent1
+    n2 = aname agent2
+    ncat n1 n2 = n1 ++ "_" ++ n2
+    simplifyOutput map = (map ! (ncat n1 n2), map ! (ncat n2 n1))
 
 simpleCompete :: ModalFormula -> ModalFormula -> (Bool, Bool)
 simpleCompete f1 f2 = compete (simpleAgent f1) (simpleAgent f2)
