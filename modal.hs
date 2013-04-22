@@ -395,7 +395,7 @@ fairBot = simpleNamedAgent "fair" $ read "[] b"
 fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
 fairBot2 = simpleNamedAgent "fair2" $ read "[2] b"
 fairBot3 = simpleNamedAgent "fair3" $ read "[3] b"
-toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
+toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<> b && <1> b && [2] b)"
 reverseFairBot = simpleNamedAgent "rfair" $ read "(~ [] ~ b) && [] b"
 magicBot = simpleNamedAgent "magic" $ read "[1]([] a -> b)"
 waitBot = simpleNamedAgent "wait" $ read "~ [] F && [1] b "
@@ -403,11 +403,10 @@ waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
 almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
 simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
 
-trollBot = MA "troll" (read "[] coop") (M.fromList [("coop", coopBot)])
-hungryTrollBot = MA "TROLL" (read "[] dbot") (M.fromList [("dbot", defectBot)])
+justBot = MA "just" (read "[] coop") (M.fromList [("coop", coopBot)])
+trollBot = MA "troll" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
--- Cooperates with toughButFairBot at this level
-checkBot = MA "check" (read "[3] (~ dbot && b)") (M.fromList [("dbot", defectBot)])
+checkBot = MA "check" (read "[1] (~ dbot && b)") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
