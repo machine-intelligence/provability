@@ -383,11 +383,15 @@ isLegalBot = modalEval ModalEvaluator {
   handleBox = const True, handleDia = const True}
 
 simpleAgent :: ModalFormula -> ModalAgent
+simpleAgent formula = MA "X" formula (M.empty) -- TODO(klao): hash the formula into the name
+
+simpleNamedAgent :: String -> ModalFormula -> ModalAgent
 simpleAgent formula = MA formula (M.empty)
 
 coopBot = simpleAgent tt
 defectBot = simpleAgent ff
 fairBot = simpleAgent $ read "[] b"
+fairBot1 = simpleAgent $ read "[1] b"
 toughButFairBot = simpleAgent $ read "[] b || (<> b && [1] b) || (<1> b && [2] b)"
 reverseFairBot = simpleAgent $ read "(~ [] ~ b) && [] b"
 magicBot = simpleAgent $ read "[1]([] a -> b)"
@@ -398,6 +402,8 @@ simpleMagicBot = simpleAgent $ read "[] (<> a -> b)" -- Behaves exactly like mag
 
 trollBot = MA (read "[] coop") (M.fromList [("coop", coopBot)])
 hungryTrollBot = MA (read "[] dbot") (M.fromList [("dbot", defectBot)])
+
+checkBot = MA (read "~ [] dbot && [1] b") (M.fromList [("dbot", defectBot)])
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
