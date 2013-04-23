@@ -406,7 +406,8 @@ waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
 almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
 simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
 
-justBot = MA "just" (read "[] coop") (M.fromList [("coop", coopBot)])
+niceBot = MA "nice" (read "[] coop") (M.fromList [("coop", coopBot)])
+justBot = MA "just" (read "[] fair") (M.fromList [("fair", fairBot)])
 trollBot = MA "troll" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
 layeredBot :: String -> ModalFormula -> Int -> ModalAgent
