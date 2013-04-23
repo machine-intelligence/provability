@@ -394,6 +394,7 @@ coopBot = simpleNamedAgent "coop" tt
 defectBot = simpleNamedAgent "dbot" ff
 fairBot = simpleNamedAgent "fair" $ read "[] b"
 fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
+fairBot1' = simpleNamedAgent "fair1'" $ read "[] ([] F -> b)"
 fairBot2 = simpleNamedAgent "fair2" $ read "[2] b"
 fairBot3 = simpleNamedAgent "fair3" $ read "[3] b"
 fairBot4 = simpleNamedAgent "fair4" $ read "[4] b"
