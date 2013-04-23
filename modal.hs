@@ -54,6 +54,7 @@ ff = Val False
 tt = Val True
 
 holdsk :: Int -> ModalFormula -> ModalFormula
+holdsk 0 phi = phi
 holdsk k phi = Neg (incon k) `Imp` phi
   where
     incon 0 = ff
@@ -406,7 +407,20 @@ simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves ex
 justBot = MA "just" (read "[] coop") (M.fromList [("coop", coopBot)])
 trollBot = MA "troll" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
-checkBot = MA "check" (read "[1] (~ dbot && b)") (M.fromList [("dbot", defectBot)])
+layeredBot :: String -> ModalFormula -> Int -> ModalAgent
+layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
+  where
+    cond k = Neg (boxk k base) `And` Neg (boxk k (Neg base))
+
+    level 0 = Box base
+    level k = foldl1 (And) (map cond [0..k-1]) `And` boxk k base
+
+    thebot k = foldl1 (Or) (map level [0..k])
+
+toughButFairBotN n = layeredBot "tbfair" (read "b") n    
+
+checkBot = MA "check" (read "[1] (~ dbot && b)") (M.fromList [("dbot", defectBot)])    
+layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) { helpers = M.fromList [("dbot", defectBot)] }
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
