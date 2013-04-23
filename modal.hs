@@ -445,11 +445,11 @@ masqueBot n = MA ("masque" ++ show n) masque (M.fromList [("db", defectBot), ("t
 --
 -- Increasing the number in the second "box" makes it cooperate with
 -- higher and higher levels of fair bots. Generally, the number in the
--- second box should be at least 2 higher than the one in the first
+-- second box should be at least 1 higher than the one in the first
 -- bot.
 checkBot = MA "check" f (M.fromList [("dbot", defectBot)])
   where
-    f = read "[] b && [2] (~ dbot)"
+    f = read "[] b && [1] ~ dbot"
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
