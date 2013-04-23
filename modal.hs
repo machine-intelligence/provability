@@ -396,6 +396,8 @@ fairBot = simpleNamedAgent "fair" $ read "[] b"
 fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
 fairBot2 = simpleNamedAgent "fair2" $ read "[2] b"
 fairBot3 = simpleNamedAgent "fair3" $ read "[3] b"
+fairBot4 = simpleNamedAgent "fair4" $ read "[4] b"
+fairBot5 = simpleNamedAgent "fair5" $ read "[5] b"
 toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<> b && <1> b && [2] b)"
 reverseFairBot = simpleNamedAgent "rfair" $ read "(~ [] ~ b) && [] b"
 magicBot = simpleNamedAgent "magic" $ read "[1]([] a -> b)"
@@ -421,6 +423,27 @@ toughButFairBotN n = layeredBot "tbfair" (read "b") n
 
 checkBot = MA "check" (read "[1] (~ dbot && b)") (M.fromList [("dbot", defectBot)])    
 layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) { helpers = M.fromList [("dbot", defectBot)] }
+
+loopBreakDBot :: ModalFormula -> ModalFormula -> Int -> ModalFormula -> ModalFormula
+loopBreakDBot fbreak fdefect n cont = breakOut n `And` cont
+  where
+    cond n = foldl1 (And) $ map (\k -> Neg (boxk k fbreak) `And` Neg (boxk k fdefect)) [0..n]
+    
+    breakOut 0 = Box fbreak
+    breakOut n = breakOut (n-1) `Or` (cond (n-1) `And` boxk n fbreak)
+
+masqueBot n = MA ("masque" ++ show n) masque (M.fromList [("db", defectBot), ("tbf", toughButFairBot)])
+  where
+    masque = loopBreakDBot (read "~ db") (read "db") n $
+             loopBreakDBot (read "tbf") (read "~tbf") n $
+             (foldl1 (Or) $ map (\k -> boxk k (read "b")) [0..n])
+                                                             
+-- Working version of CheckBot, created by hand by constructing
+-- possible cooperation matrices for successive Kripke levels.
+paulBot = MA "paul" f (M.fromList [("dbot", defectBot), ("fair", fairBot)])
+  where
+    -- f = read "~ [1] (dbot || ~fair) || [] f || ([] [] f && [] fair)"
+    f = read "[] b && (~ [1] (dbot || ~fair) || [] [] f)"
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
@@ -453,7 +476,9 @@ competitionNameCat :: String -> String -> String
 competitionNameCat name1 name2 = name1 ++ "_vs_" ++ name2
 
 competitionSloppyNames :: ModalAgent -> ModalAgent -> Map String ModalFormula
-competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2) = top `M.union` left `M.union` right
+competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2)
+  | n1 == n2 && na1 /= na2 = error "Different agents competing with same names"
+  | otherwise = top `M.union` left `M.union` right
   where
     ncat = competitionNameCat
     
