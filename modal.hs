@@ -422,7 +422,6 @@ layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
 
 toughButFairBotN n = layeredBot "tbfair" (read "b") n    
 
-checkBot = MA "check" (read "[1] (~ dbot && b)") (M.fromList [("dbot", defectBot)])    
 layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) { helpers = M.fromList [("dbot", defectBot)] }
 
 loopBreakDBot :: ModalFormula -> ModalFormula -> Int -> ModalFormula -> ModalFormula
@@ -440,11 +439,17 @@ masqueBot n = MA ("masque" ++ show n) masque (M.fromList [("db", defectBot), ("t
              (foldl1 (Or) $ map (\k -> boxk k (read "b")) [0..n])
                                                              
 -- Working version of CheckBot, created by hand by constructing
--- possible cooperation matrices for successive Kripke levels.
-paulBot = MA "paul" f (M.fromList [("dbot", defectBot), ("fair", fairBot)])
+-- possible cooperation matrices for successive Kripke levels. And
+-- then simplified repeatedly till it looked exactly like Check bot
+-- should look like.
+--
+-- Increasing the number in the second "box" makes it cooperate with
+-- higher and higher levels of fair bots. Generally, the number in the
+-- second box should be at least 2 higher than the one in the first
+-- bot.
+checkBot = MA "check" f (M.fromList [("dbot", defectBot)])
   where
-    -- f = read "~ [1] (dbot || ~fair) || [] f || ([] [] f && [] fair)"
-    f = read "[] b && (~ [1] (dbot || ~fair) || [] [] f)"
+    f = read "[] b && [2] (~ dbot)"
 
 -- all the bots
 unaryCombinations :: [[a]] -> (a -> a) -> [[a]]
