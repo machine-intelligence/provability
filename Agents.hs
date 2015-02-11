@@ -10,7 +10,7 @@ data Variable = V String deriving (Eq, Ord)
 instance Show Variable where show (V s) = s
 
 instance Read Variable where
-    readsPrec _ str = if not $ null name then [(V name, rest)] else [] where
+    readsPrec _ str = [(V name, rest) | not $ null name] where
         name = takeWhile (`elem` ['a' .. 'z']) str
         rest = dropWhile (`elem` ['a' .. 'z']) str
 
@@ -37,10 +37,10 @@ isLegalBot = modalEval ModalEvaluator {
   handleBox = const True, handleDia = const True}
 
 simpleAgent :: ModalFormula Variable -> ModalAgent
-simpleAgent formula = MA ("AGENT(" ++ show formula ++ ")") formula (M.empty)
+simpleAgent formula = MA ("AGENT(" ++ show formula ++ ")") formula M.empty
 
 simpleNamedAgent :: String -> ModalFormula Variable -> ModalAgent
-simpleNamedAgent name formula = MA name formula (M.empty)
+simpleNamedAgent name formula = MA name formula M.empty
 
 coopBot = simpleNamedAgent "coop" tt
 defectBot = simpleNamedAgent "dbot" ff
@@ -69,11 +69,11 @@ layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
     cond k = Neg (boxk k base) `And` Neg (boxk k (Neg base))
 
     level 0 = Box base
-    level k = foldl1 (And) (map cond [0..k-1]) `And` boxk k base
+    level k = foldl1 And (map cond [0..k-1]) `And` boxk k base
 
-    thebot k = foldl1 (Or) (map level [0..k])
+    thebot k = foldl1 Or (map level [0..k])
 
-toughButFairBotN n = layeredBot "tbfair" (read "b") n
+toughButFairBotN = layeredBot "tbfair" (read "b")
 
 layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) { helpers = M.fromList [("dbot", defectBot)] }
 
@@ -81,7 +81,7 @@ loopBreakDBot :: ModalFormula Variable -> ModalFormula Variable ->
                  Int -> ModalFormula Variable -> ModalFormula Variable
 loopBreakDBot fbreak fdefect x cont = breakOut x `And` cont
   where
-    cond n = foldl1 (And) $ map (\k -> Neg (boxk k fbreak) `And` Neg (boxk k fdefect)) [0..n]
+    cond n = foldl1 And $ map (\k -> Neg (boxk k fbreak) `And` Neg (boxk k fdefect)) [0..n]
 
     breakOut 0 = Box fbreak
     breakOut n = breakOut (n-1) `Or` (cond (n-1) `And` boxk n fbreak)
@@ -90,7 +90,7 @@ masqueBot n = MA ("masque" ++ show n) masque (M.fromList [("db", defectBot), ("t
   where
     masque = loopBreakDBot (read "~ db") (read "db") n $
              loopBreakDBot (read "tbf") (read "~tbf") n $
-             (foldl1 (Or) $ map (\k -> boxk k (read "b")) [0..n])
+             foldl1 Or (map (\k -> boxk k (read "b")) [0..n])
 
 -- Working version of CheckBot, created by hand by constructing
 -- possible cooperation matrices for successive Kripke levels. And
@@ -111,7 +111,7 @@ unaryCombinations lists f = map (map f) lists
 
 binaryCombinations :: [[a]] -> (a -> a -> a) -> [[a]]
 binaryCombinations lists f = map level [1..] where
-  level n = let r = (take n lists) in concat $ zipWith (liftA2 f) r (reverse r)
+  level n = let r = take n lists in concat $ zipWith (liftA2 f) r (reverse r)
 
 allFormulasTiered :: [v] -> [[ModalFormula v]]
 allFormulasTiered names = formulas where
@@ -233,7 +233,7 @@ checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
 -- Did a niceBot ever defect against us?
 checkNiceBots :: ModalFormula Variable -> Int -> Maybe (ModalFormula Variable)
 checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
-  defectsAgainstMe bot' = snd (simpleCompete bot bot') == False
+  defectsAgainstMe bot' = not $ snd $ simpleCompete bot bot'
 
 -- Did this bot ever fail to exploit a suckerBot?
 

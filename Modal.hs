@@ -1,5 +1,6 @@
 module Modal where
 import Control.Applicative hiding ((<|>))
+import Control.Arrow (second)
 import Data.List
 import Data.Maybe
 import Data.Map (Map)
@@ -87,15 +88,15 @@ idModalEvaluator = ModalEvaluator {
 -- And how to use it to map:
 modalEval :: ModalEvaluator v a -> ModalFormula v -> a
 modalEval m = f where
-  f (Val v) = (handleVal m) v
-  f (Var v) = (handleVar m) v
-  f (Neg x) = (handleNeg m) (f x)
-  f (And x y) = (handleAnd m) (f x) (f y)
-  f (Or  x y) = (handleOr m) (f x) (f y)
-  f (Imp x y) = (handleImp m) (f x) (f y)
-  f (Iff x y) = (handleIff m) (f x) (f y)
-  f (Box x) = (handleBox m) (f x)
-  f (Dia x) = (handleDia m) (f x)
+  f (Val v) = handleVal m v
+  f (Var v) = handleVar m v
+  f (Neg x) = handleNeg m (f x)
+  f (And x y) = handleAnd m (f x) (f y)
+  f (Or  x y) = handleOr m (f x) (f y)
+  f (Imp x y) = handleImp m (f x) (f y)
+  f (Iff x y) = handleIff m (f x) (f y)
+  f (Box x) = handleBox m (f x)
+  f (Dia x) = handleDia m (f x)
 
 instance Show v => Show (ModalFormula v) where
   showsPrec _ (Val l) = showString $ if l then "T" else "F"
@@ -113,29 +114,29 @@ instance Show v => Show (ModalFormula v) where
 formulaParser :: Read v => Parser (ModalFormula v)
 formulaParser = buildExpressionParser table term <?> "ModalFormula"
   where
-    table = [ [prefix $ choice [ (m_reservedOp "~" >> return Neg)
-                               , (m_reservedOp "[]" >> return Box)
-                               , (m_reservedOp "[0]" >> return Box)
-                               , (m_reservedOp "[1]" >> return (boxk 1))
-                               , (m_reservedOp "[2]" >> return (boxk 2))
-                               , (m_reservedOp "[3]" >> return (boxk 3))
-                               , (m_reservedOp "[4]" >> return (boxk 4))
-                               , (m_reservedOp "[5]" >> return (boxk 5))
-                               , (m_reservedOp "[6]" >> return (boxk 6))
-                               , (m_reservedOp "[7]" >> return (boxk 7))
-                               , (m_reservedOp "[8]" >> return (boxk 8))
-                               , (m_reservedOp "[9]" >> return (boxk 9))
-                               , (m_reservedOp "<>" >> return Dia)
-                               , (m_reservedOp "<0>" >> return Dia)
-                               , (m_reservedOp "<1>" >> return (diak 1))
-                               , (m_reservedOp "<2>" >> return (diak 2))
-                               , (m_reservedOp "<3>" >> return (diak 3))
-                               , (m_reservedOp "<4>" >> return (diak 4))
-                               , (m_reservedOp "<5>" >> return (diak 5))
-                               , (m_reservedOp "<6>" >> return (diak 6))
-                               , (m_reservedOp "<7>" >> return (diak 7))
-                               , (m_reservedOp "<8>" >> return (diak 8))
-                               , (m_reservedOp "<9>" >> return (diak 9))
+    table = [ [prefix $ choice [ m_reservedOp "~" >> return Neg
+                               , m_reservedOp "[]" >> return Box
+                               , m_reservedOp "[0]" >> return Box
+                               , m_reservedOp "[1]" >> return (boxk 1)
+                               , m_reservedOp "[2]" >> return (boxk 2)
+                               , m_reservedOp "[3]" >> return (boxk 3)
+                               , m_reservedOp "[4]" >> return (boxk 4)
+                               , m_reservedOp "[5]" >> return (boxk 5)
+                               , m_reservedOp "[6]" >> return (boxk 6)
+                               , m_reservedOp "[7]" >> return (boxk 7)
+                               , m_reservedOp "[8]" >> return (boxk 8)
+                               , m_reservedOp "[9]" >> return (boxk 9)
+                               , m_reservedOp "<>" >> return Dia
+                               , m_reservedOp "<0>" >> return Dia
+                               , m_reservedOp "<1>" >> return (diak 1)
+                               , m_reservedOp "<2>" >> return (diak 2)
+                               , m_reservedOp "<3>" >> return (diak 3)
+                               , m_reservedOp "<4>" >> return (diak 4)
+                               , m_reservedOp "<5>" >> return (diak 5)
+                               , m_reservedOp "<6>" >> return (diak 6)
+                               , m_reservedOp "<7>" >> return (diak 7)
+                               , m_reservedOp "<8>" >> return (diak 8)
+                               , m_reservedOp "<9>" >> return (diak 9)
                                ] ]
             , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
             , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
@@ -212,16 +213,9 @@ propositionalEval = modalEval propositionalEvalHandler
 -- Evaluate the modal formula assuming the soundness of the system
 
 evalWithSoundnessHandler :: ModalEvaluator v (Maybe Bool)
-evalWithSoundnessHandler = ModalEvaluator {
-    handleVal = Just,
-    handleVar = const Nothing,
-    handleNeg = fmap not,
-    handleAnd = liftA2 (&&),
-    handleOr  = liftA2 (||),
-    handleImp = liftA2 (<=),
-    handleIff = liftA2 (==),
-    handleBox = (\x -> if x == Just False then Just False else Nothing),
-    handleDia = (\x -> if x == Just True then Just True else Nothing)}
+evalWithSoundnessHandler = propositionalEvalHandler{
+    handleBox = \x -> if x == Just False then Just False else Nothing,
+    handleDia = \x -> if x == Just True then Just True else Nothing}
 
 evalWithSoundness :: ModalFormula v -> Maybe Bool
 evalWithSoundness = modalEval evalWithSoundnessHandler
@@ -230,10 +224,10 @@ evalWithSoundness = modalEval evalWithSoundnessHandler
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula v -> ModalFormula v
 mapFormulaOutput f formula = g (f False) (f True)
   where
-    g True True = (Val True)
-    g False False = (Val False)
+    g True True = Val True
+    g False False = Val False
     g False True = formula
-    g True False = (Neg formula)
+    g True False = Neg formula
 
 simplifyBinaryOperator :: (ModalFormula v -> ModalFormula v -> ModalFormula v) ->
                           (Bool -> Bool -> Bool) ->
@@ -241,23 +235,23 @@ simplifyBinaryOperator :: (ModalFormula v -> ModalFormula v -> ModalFormula v) -
                           ModalFormula v
 simplifyBinaryOperator _  behavior (Val a) (Val b) = Val (behavior a b)
 simplifyBinaryOperator _  behavior (Val a) formula =
-  mapFormulaOutput (\b -> behavior a b) formula
+  mapFormulaOutput (behavior a) formula
 simplifyBinaryOperator _  behavior formula (Val b) =
-  mapFormulaOutput (\a -> behavior a b) formula
+  mapFormulaOutput (`behavior` b) formula
 simplifyBinaryOperator op _ f1 f2 = op f1 f2
 
 simplifyNeg :: ModalFormula v -> ModalFormula v
-simplifyNeg (Val v) = (Val (not v))
+simplifyNeg (Val v) = Val (not v)
 simplifyNeg (Neg x) = x
-simplifyNeg x = (Neg x)
+simplifyNeg x = Neg x
 
 simplifyBox :: ModalFormula v -> ModalFormula v
 simplifyBox t@(Val True) = t
-simplifyBox x = (Box x)
+simplifyBox x = Box x
 
 simplifyDia :: ModalFormula v -> ModalFormula v
 simplifyDia f@(Val False) = f
-simplifyDia x = (Dia x)
+simplifyDia x = Dia x
 
 
 simplifyHandler :: ModalEvaluator v (ModalFormula v)
@@ -292,11 +286,11 @@ glEval :: ModalFormula v -> [Bool]
 glEval = modalEval glEvalHandler
 
 glEvalStandard :: ModalFormula v -> Bool
-glEvalStandard formula = (glEval formula) !! (maxModalDepth formula)
+glEvalStandard formula = glEval formula !! maxModalDepth formula
 
 simplifiedMaxDepth :: ModalFormula v -> Int
 simplifiedMaxDepth formula =
-  depth - (length $ (!!0) $ group $ reverse results) + 1 where
+  depth - length (head $ group $ reverse results) + 1 where
     results = take (depth+1) (glEval formula)
     depth = maxModalDepth formula
 
@@ -311,10 +305,9 @@ fixpointGLEval var fi = result
 generalFixpointGLEval :: Ord v => Map v (ModalFormula v) -> Map v [Bool]
 generalFixpointGLEval formulaMap = evalMap
   where
+    evalHandler = glEvalHandler{handleVar = \var ->
+        fromMaybe (error "Unmapped variable in generalFixpointGLEval") (M.lookup var evalMap)}
     evalMap = M.map (modalEval evalHandler) formulaMap
-    evalHandler = glEvalHandler{handleVar=(\var -> case M.lookup var evalMap of
-        Just l -> l
-        Nothing -> error "Unmapped variable in generalFixpointGLEval")}
 
 -- Finding the fixedpoints
 
@@ -331,11 +324,11 @@ findFixpoint n xs = (!!0) $ fromJust $ find (lengthAtLeast n) $ group xs
 
 -- Find the Fixpoint for a Modal formula
 findGLFixpoint :: Eq v => v -> ModalFormula v -> Bool
-findGLFixpoint var formula = findFixpoint (1+(maxModalDepth formula)) (fixpointGLEval var formula)
+findGLFixpoint var formula = findFixpoint (1 + maxModalDepth formula) (fixpointGLEval var formula)
 
 -- Find the Fixpoint for a collection of Modal formulas
 makeEquivs :: Read v => [(String, String)] -> Map String (ModalFormula v)
-makeEquivs = M.fromList . map (\(v, f) -> (v, read f))
+makeEquivs = M.fromList . map (second read)
 
 generalGLEvalSeq :: Ord v => Map v (ModalFormula v)-> [Map v Bool]
 generalGLEvalSeq formulaMap = map level [0..]

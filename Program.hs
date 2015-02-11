@@ -70,6 +70,7 @@ data NewcombAction = OneBox | TwoBox deriving (Eq,Ord,Show,Read,Enum)
 data NewcombOutcome = MillionThousand | Million | Thousand | Naught
   deriving (Eq,Ord,Show,Read,Enum)
 
+onebox, twobox :: ModalFormula NewcombAction
 onebox = Var OneBox
 twobox = Neg onebox
 
@@ -80,6 +81,7 @@ newcomb k Thousand        = twobox %^ Neg (boxk k onebox)
 newcomb k Naught          = onebox %^ Neg (boxk k onebox)
 
 
+main :: IO ()
 main = do
   print $ evalUDT 0 fiveAndTen Five
   print $ evalUDT 0 (newcomb 0) OneBox
