@@ -81,6 +81,13 @@ newcomb k Naught          = onebox %^ Neg (boxk k onebox)
 
 
 main = do
+  putStrLn "UDT takes 5 in the 5-and-10 problem:"
   print $ evalUDT 0 fiveAndTen Five
+  putStrLn ""
+  putStrLn "In Newcomb's problem, if the predictor uses a box to predict"
+  putStrLn "the agent's action, UDT takes whatever its default action was:"
   print $ evalUDT 0 (newcomb 0) OneBox
+  print $ evalUDT 0 (newcomb 0) TwoBox
+  putStrLn ""
+  putStrLn "This is the modal formula that's true if UDT one-boxes:"
   print $ udt 0 (newcomb 0) OneBox OneBox
