@@ -1,6 +1,6 @@
 module Modal where
 import Control.Applicative hiding ((<|>))
-import Control.Arrow (second)
+import Control.Arrow ((***))
 import Data.List
 import Data.Maybe
 import Data.Map (Map)
@@ -327,8 +327,8 @@ findGLFixpoint :: Eq v => v -> ModalFormula v -> Bool
 findGLFixpoint var formula = findFixpoint (1 + maxModalDepth formula) (fixpointGLEval var formula)
 
 -- Find the Fixpoint for a collection of Modal formulas
-makeEquivs :: Read v => [(String, String)] -> Map String (ModalFormula v)
-makeEquivs = M.fromList . map (second read)
+makeEquivs :: (Ord v, Read v) => [(String, String)] -> Map v (ModalFormula v)
+makeEquivs = M.fromList . map (read *** read)
 
 generalGLEvalSeq :: Ord v => Map v (ModalFormula v)-> [Map v Bool]
 generalGLEvalSeq formulaMap = map level [0..]
@@ -337,6 +337,6 @@ generalGLEvalSeq formulaMap = map level [0..]
     result = generalFixpointGLEval formulaMap
 
 findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
-findGeneralGLFixpoint formulaMap = findFixpoint (1+maxFormulaDepth) results where
+findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
   results = generalGLEvalSeq formulaMap
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
