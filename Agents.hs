@@ -11,8 +11,8 @@ instance Show Variable where show (V s) = s
 
 instance Read Variable where
     readsPrec _ str = [(V name, rest) | not $ null name] where
-        name = takeWhile (`elem` ['a' .. 'z']) str
-        rest = dropWhile (`elem` ['a' .. 'z']) str
+        name = takeWhile (`elem` '_' : ['a' .. 'z']) str
+        rest = dropWhile (`elem` '_' : ['a' .. 'z']) str
 
 data ModalAgent = MA { aname :: String,
                        agentFormula :: ModalFormula Variable,

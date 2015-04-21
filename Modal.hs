@@ -165,8 +165,8 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                 , whiteSpace = _ } =
       makeTokenParser emptyDef { commentStart = "{-"
                                , commentEnd = "-}"
-                               , identStart = letter
-                               , identLetter = letter
+                               , identStart = letter <|> char '_'
+                               , identLetter = letter <|> char '_'
                                , opStart = oneOf "~-<[&|"
                                , opLetter = oneOf "~-<>[]&|123456789"
                                , reservedOpNames = [ "~", "&&", "||", "->", "<->", "[]", "<>"
