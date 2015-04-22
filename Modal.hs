@@ -102,22 +102,24 @@ modalEval m = f where
   f (Dia x) = handleDia m (f x)
 
 instance Show v => Show (ModalFormula v) where
-  showsPrec _ (Val l) = showString $ if l then "T" else "F"
+  showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
   showsPrec _ (Var v) = showString $ show v
-  showsPrec p (Neg x) = showParen (p > 8) $ showString "~ " . showsPrec 8 x
-  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " && " . showsPrec 8 y
-  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " || " . showsPrec 7 y
-  showsPrec p (Imp x y) = showParen (p > 5) $ showsPrec 6 x . showString " -> " . showsPrec 5 y
-  showsPrec p (Iff x y) = showParen (p > 4) $ showsPrec 5 x . showString " <-> " . showsPrec 4 y
-  showsPrec p (Box x) = showParen (p > 8) $ showString "[] " . showsPrec 8 x
-  showsPrec p (Dia x) = showParen (p > 8) $ showString "<> " . showsPrec 8 x
+  showsPrec p (Neg x) = showParen (p > 8) $ showString "¬" . showsPrec 8 x
+  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " ∧ " . showsPrec 8 y
+  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " ∨ " . showsPrec 7 y
+  showsPrec p (Imp x y) = showParen (p > 5) $ showsPrec 6 x . showString " → " . showsPrec 5 y
+  showsPrec p (Iff x y) = showParen (p > 4) $ showsPrec 5 x . showString " ↔ " . showsPrec 4 y
+  showsPrec p (Box x) = showParen (p > 8) $ showString "□" . showsPrec 8 x
+  showsPrec p (Dia x) = showParen (p > 8) $ showString "◇" . showsPrec 8 x
 
 --------------------------------------------------------------------------------
 
 formulaParser :: Read v => Parser (ModalFormula v)
 formulaParser = buildExpressionParser table term <?> "ModalFormula"
   where
-    table = [ [prefix $ choice [ m_reservedOp "~" >> return Neg
+    table = [ [prefix $ choice [ m_reservedOp "¬" >> return Neg
+                               , m_reservedOp "~" >> return Neg
+                               , m_reservedOp "□" >> return Box
                                , m_reservedOp "[]" >> return Box
                                , m_reservedOp "[0]" >> return Box
                                , m_reservedOp "[1]" >> return (boxk 1)
@@ -129,6 +131,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , m_reservedOp "[7]" >> return (boxk 7)
                                , m_reservedOp "[8]" >> return (boxk 8)
                                , m_reservedOp "[9]" >> return (boxk 9)
+                               , m_reservedOp "◇" >> return Dia
                                , m_reservedOp "<>" >> return Dia
                                , m_reservedOp "<0>" >> return Dia
                                , m_reservedOp "<1>" >> return (diak 1)
@@ -141,15 +144,21 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , m_reservedOp "<8>" >> return (diak 8)
                                , m_reservedOp "<9>" >> return (diak 9)
                                ] ]
+            , [Infix (m_reservedOp "∧" >> return And) AssocLeft]
             , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
+            , [Infix (m_reservedOp "∨" >> return  Or) AssocLeft]
             , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
+            , [Infix (m_reservedOp "→" >> return Imp) AssocRight]
             , [Infix (m_reservedOp "->" >> return Imp) AssocRight]
+            , [Infix (m_reservedOp "↔" >> return Iff) AssocRight]
             , [Infix (m_reservedOp "<->" >> return Iff) AssocRight]
             ]
 
     term = m_parens formulaParser
            <|> m_braces formulaParser
+           <|> (m_reserved "⊤" >> return (Val True))
            <|> (m_reserved "T" >> return (Val True))
+           <|> (m_reserved "⊥" >> return (Val False))
            <|> (m_reserved "F" >> return (Val False))
            <|> fmap (Var . read) m_identifier
 
@@ -167,12 +176,13 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                , commentEnd = "-}"
                                , identStart = letter <|> char '_'
                                , identLetter = letter <|> char '_'
-                               , opStart = oneOf "~-<[&|"
-                               , opLetter = oneOf "~-<>[]&|123456789"
-                               , reservedOpNames = [ "~", "&&", "||", "->", "<->", "[]", "<>"
+                               , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
+                               , opLetter = oneOf "->]&|123456789"
+                               , reservedOpNames = [ "¬", "∧", "∨", "→", "↔", "□", "◇"
+                                                   , "~", "&&", "||", "->", "<->", "[]", "<>"
                                                    , "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]"
                                                    , "<1>", "<2>", "<3>", "<4>", "<5>", "<6>", "<7>", "<8>", "<9>" ]
-                               , reservedNames = ["T", "F"]
+                               , reservedNames = ["T", "F", "⊤", "⊥"]
                                , caseSensitive = False
                                }
 
@@ -183,6 +193,17 @@ instance Read v => Read (ModalFormula v) where
     -- much nicer errors. So we ask it to consume the whole input and
     -- fail if it fails.
     Left err -> error $ show err
+
+mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
+mapVariable _ (Val b) = Val b
+mapVariable f (Var b) = Var (f b)
+mapVariable f (Neg x) = Neg (mapVariable f x)
+mapVariable f (And x y) = And (mapVariable f x) (mapVariable f y)
+mapVariable f (Or x y) = Or (mapVariable f x) (mapVariable f y)
+mapVariable f (Imp x y) = Imp (mapVariable f x) (mapVariable f y)
+mapVariable f (Iff x y) = Iff (mapVariable f x) (mapVariable f y)
+mapVariable f (Box x) = Box (mapVariable f x)
+mapVariable f (Dia x) = Dia (mapVariable f x)
 
 --------------------------------------------------------------------------------
 
