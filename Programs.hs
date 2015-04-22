@@ -55,6 +55,9 @@ mFor' (c:cs) f = f c >-> mFor' cs f
 mFor :: Enum c => (c -> ProgFrag v a) -> ProgFrag v a
 mFor = mFor' enumerate
 
+-- A map from actions to whether or not the agent takes that action.
+programBehavior :: (Ord a, Enum a) => ModalProgram a a -> Map a Bool
+programBehavior = findGeneralGLFixpoint . progToMap
 
 -- A map of actions for which the action equation is true.
 -- (Only one of these should be the case, if the program is p.m.e.e.)
@@ -87,7 +90,7 @@ query' :: (Ord a, Ord q, Enum a) =>
   ModalProgram a a -> Map q (ModalFormula a -> ModalFormula a) -> Map (Either q a) Bool
 query' prog queries = findGeneralGLFixpoint $ union qmap pmap where
   f = trueFormula prog
-  qmap = mapKeysMonotonic Left $ Map.map (\f2g -> mapVariable Right $ f2g f) queries
+  qmap = mapKeysMonotonic Left $ Map.map (mapVariable Right . ($ f)) queries
   pmap = mapKeysMonotonic Right $ Map.map (mapVariable Right) $ progToMap prog
 
 -- Gives you a boolean answer to a single query about the true formula.

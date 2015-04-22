@@ -4,7 +4,7 @@ import Programs
 
 data FiveOrTen = Ten | Five deriving (Eq, Ord, Read, Enum)
 instance Show FiveOrTen where
-  show Ten = "10"
+  show Ten  = "10"
   show Five = "5"
 
 fiveAndTen :: ModalProgram FiveOrTen FiveOrTen
@@ -12,12 +12,18 @@ fiveAndTen Five = Var Five
 fiveAndTen Ten = Var Ten
 
 
-data NewcombAction = OneBox | TwoBox deriving (Eq,Ord,Read,Enum)
+data NewcombAction = OneBox | TwoBox deriving (Eq, Ord, Read, Enum)
 instance Show NewcombAction where
   show OneBox = "1"
   show TwoBox = "2"
+
 data NewcombOutcome = MillionThousand | Million | Thousand | Naught
-  deriving (Eq,Ord,Show,Read,Enum)
+  deriving (Eq, Ord, Read, Enum)
+instance Show NewcombOutcome where
+  show MillionThousand = "1001000"
+  show Million         = "1000000"
+  show Thousand        = "1000"
+  show Naught          = "0"
 
 onebox, twobox :: ModalFormula NewcombAction
 onebox = Var OneBox
@@ -30,8 +36,8 @@ newcomb k Thousand        = twobox %^ Neg (boxk k onebox)
 newcomb k Naught          = onebox %^ Neg (boxk k onebox)
 
 
-data AorB = A | B deriving (Eq,Ord,Show,Read,Enum)
-data GoodOrBad = Good | Bad deriving (Eq,Ord,Show,Read,Enum)
+data AorB = A | B deriving (Eq, Ord, Show, Read, Enum)
+data GoodOrBad = Good | Bad deriving (Eq, Ord, Show, Read, Enum)
 
 doesA, doesB :: ModalFormula AorB
 doesA = Var A
@@ -46,17 +52,24 @@ bGame k Good = boxk k doesB
 bGame k Bad  = Neg (boxk k doesB)
 
 
-data Strangeverse = StrangeTen | StrangeFive | StrangeZero deriving (Eq,Ord,Show,Read,Enum)
-data Strangeact = Alpha | Beta deriving (Eq,Ord,Show,Read,Enum)
+data Strangeverse = Three | Two | One deriving (Eq, Ord, Read, Enum)
+instance Show Strangeverse where
+  show Three = "3"
+  show Two   = "2"
+  show One   = "1"
+data Strangeact = Alpha | Beta deriving (Eq, Ord, Read, Enum)
+instance Show Strangeact where
+  show Alpha = "α"
+  show Beta  = "β"
 
 doesAlpha, doesBeta :: ModalFormula Strangeact
 doesAlpha = Var Alpha
 doesBeta  = Neg doesAlpha
 
 strangeverse :: Int -> ModalProgram Strangeact Strangeverse
-strangeverse k StrangeTen  = doesAlpha %^ boxk k doesBeta
-strangeverse _ StrangeFive = doesBeta
-strangeverse k StrangeZero = doesAlpha %^ Neg (boxk k doesBeta)
+strangeverse k Three  = doesAlpha %^ boxk k doesBeta
+strangeverse _ Two = doesBeta
+strangeverse k One = doesAlpha %^ Neg (boxk k doesBeta)
 
 
 main :: IO ()

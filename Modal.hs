@@ -3,7 +3,7 @@ import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
 import Data.List
 import Data.Maybe
-import Data.Map (Map)
+import Data.Map (Map, (!))
 import qualified Data.Map as M
 import Text.Parsec
 import Text.Parsec.Expr
@@ -82,12 +82,6 @@ data ModalEvaluator v a = ModalEvaluator {
     handleBox :: a -> a,
     handleDia :: a -> a}
 
-idModalEvaluator :: ModalEvaluator v (ModalFormula v)
-idModalEvaluator = ModalEvaluator {
-  handleVar = Var, handleVal = Val, handleNeg = Neg,
-  handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
-  handleBox = Box, handleDia = Dia }
-
 -- And how to use it to map:
 modalEval :: ModalEvaluator v a -> ModalFormula v -> a
 modalEval m = f where
@@ -100,6 +94,18 @@ modalEval m = f where
   f (Iff x y) = handleIff m (f x) (f y)
   f (Box x) = handleBox m (f x)
   f (Dia x) = handleDia m (f x)
+
+mappingModalEvaluator :: (v -> a) -> ModalEvaluator v (ModalFormula a)
+mappingModalEvaluator f = ModalEvaluator {
+  handleVar = Var . f, handleVal = Val, handleNeg = Neg,
+  handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
+  handleBox = Box, handleDia = Dia }
+
+mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
+mapVariable = modalEval . mappingModalEvaluator
+
+idModalEvaluator :: ModalEvaluator v (ModalFormula v)
+idModalEvaluator = mappingModalEvaluator id
 
 instance Show v => Show (ModalFormula v) where
   showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
@@ -194,17 +200,6 @@ instance Read v => Read (ModalFormula v) where
     -- fail if it fails.
     Left err -> error $ show err
 
-mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
-mapVariable _ (Val b) = Val b
-mapVariable f (Var b) = Var (f b)
-mapVariable f (Neg x) = Neg (mapVariable f x)
-mapVariable f (And x y) = And (mapVariable f x) (mapVariable f y)
-mapVariable f (Or x y) = Or (mapVariable f x) (mapVariable f y)
-mapVariable f (Imp x y) = Imp (mapVariable f x) (mapVariable f y)
-mapVariable f (Iff x y) = Iff (mapVariable f x) (mapVariable f y)
-mapVariable f (Box x) = Box (mapVariable f x)
-mapVariable f (Dia x) = Dia (mapVariable f x)
-
 --------------------------------------------------------------------------------
 
 -- Nesting Depth of Modal Operators
@@ -243,6 +238,24 @@ evalWithSoundnessHandler = propositionalEvalHandler{
 
 evalWithSoundness :: ModalFormula v -> Maybe Bool
 evalWithSoundness = modalEval evalWithSoundnessHandler
+
+-- Evaluate the modal formula assuming the soundness of the system, and given
+-- values for all the variables.
+
+evalWithSoundnessAndAnswersHandler :: Ord v => Map v Bool -> ModalEvaluator v Bool
+evalWithSoundnessAndAnswersHandler m = ModalEvaluator {
+    handleVal = id,
+    handleVar = (m !),
+    handleNeg = not,
+    handleAnd = (&&),
+    handleOr  = (||),
+    handleImp = (<=),
+    handleIff = (==),
+    handleBox = id,
+    handleDia = id}
+
+evalWithSoundnessAndAnswers :: Ord v => Map v Bool -> ModalFormula v -> Bool
+evalWithSoundnessAndAnswers = modalEval . evalWithSoundnessAndAnswersHandler
 
 -- How to simplify modal formulas:
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula v -> ModalFormula v
