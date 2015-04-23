@@ -239,6 +239,24 @@ evalWithSoundnessHandler = propositionalEvalHandler{
 evalWithSoundness :: ModalFormula v -> Maybe Bool
 evalWithSoundness = modalEval evalWithSoundnessHandler
 
+-- Evaluate the modal formula assuming the soundness of the system, and given
+-- values for all the variables.
+
+evalWithSoundnessAndAnswersHandler :: Ord v => Map v Bool -> ModalEvaluator v Bool
+evalWithSoundnessAndAnswersHandler m = ModalEvaluator {
+    handleVal = id,
+    handleVar = (m !),
+    handleNeg = not,
+    handleAnd = (&&),
+    handleOr  = (||),
+    handleImp = (<=),
+    handleIff = (==),
+    handleBox = id,
+    handleDia = id}
+
+evalWithSoundnessAndAnswers :: Ord v => Map v Bool -> ModalFormula v -> Bool
+evalWithSoundnessAndAnswers = modalEval . evalWithSoundnessAndAnswersHandler
+
 -- How to simplify modal formulas:
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula v -> ModalFormula v
 mapFormulaOutput f formula = g (f False) (f True)

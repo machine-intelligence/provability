@@ -80,6 +80,14 @@ trueFormula = snd . trueEquation
 evalProgram :: (Ord a, Enum a) => ModalProgram a a -> a
 evalProgram = fst . trueEquation
 
+-- Takes a question about the true formula (as a function from formulas to
+-- formulas) and answers it (by evaluating it given how all the action formulas
+-- are actually valued).
+query :: (Ord a, Enum a) => ModalProgram a a -> (ModalFormula a -> ModalFormula a) -> Bool
+query prog q = evalWithSoundnessAndAnswers answers (q f) where
+  answers = programBehavior prog
+  f = trueFormula prog
+
 -- Lets you ask a number of additional questions about the true formula.
 -- You give a map from a qurey type onto a way to transform the true formula
 -- into a query formula, and this gives you back the map with answers to all
