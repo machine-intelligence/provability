@@ -239,24 +239,6 @@ evalWithSoundnessHandler = propositionalEvalHandler{
 evalWithSoundness :: ModalFormula v -> Maybe Bool
 evalWithSoundness = modalEval evalWithSoundnessHandler
 
--- Evaluate the modal formula assuming the soundness of the system, and given
--- values for all the variables.
-
-evalWithSoundnessAndAnswersHandler :: Ord v => Map v Bool -> ModalEvaluator v Bool
-evalWithSoundnessAndAnswersHandler m = ModalEvaluator {
-    handleVal = id,
-    handleVar = (m !),
-    handleNeg = not,
-    handleAnd = (&&),
-    handleOr  = (||),
-    handleImp = (<=),
-    handleIff = (==),
-    handleBox = id,
-    handleDia = id}
-
-evalWithSoundnessAndAnswers :: Ord v => Map v Bool -> ModalFormula v -> Bool
-evalWithSoundnessAndAnswers = modalEval . evalWithSoundnessAndAnswersHandler
-
 -- How to simplify modal formulas:
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula v -> ModalFormula v
 mapFormulaOutput f formula = g (f False) (f True)
@@ -307,10 +289,11 @@ simplify :: ModalFormula v -> ModalFormula v
 simplify = modalEval simplifyHandler
 
 -- GL Eval in standard model
+
 glEvalHandler :: ModalEvaluator v [Bool]
 glEvalHandler = ModalEvaluator {
     handleVal = repeat,
-    handleVar = error "Variables are not supported in GLEval.",
+	handleVar = error "Variables are not supported in GLEval",
     handleNeg = fmap not,
     handleAnd = zipWith (&&),
     handleOr  = zipWith (||),
@@ -319,11 +302,24 @@ glEvalHandler = ModalEvaluator {
     handleBox = scanl (&&) True,
     handleDia = scanl (||) False}
 
+-- The reason we don't combine this with the above is because that would induce
+-- an Ord constraint on v unnecessarily.
+glEvalHandlerWithVars :: Ord v => Map v [Bool] -> ModalEvaluator v [Bool]
+glEvalHandlerWithVars m = glEvalHandler{
+	handleVar = fromMaybe (error "Unmapped variable in GLEval") . (`M.lookup` m)}
+
+glEvalWithVars :: Ord v => Map v [Bool] -> ModalFormula v -> [Bool]
+glEvalWithVars = modalEval . glEvalHandlerWithVars
+
+glEvalWithVarsStandard :: Ord v => Map v [Bool] -> ModalFormula v -> Bool
+glEvalWithVarsStandard m f = glEvalWithVars m f !! maxModalDepth f
+
 glEval :: ModalFormula v -> [Bool]
 glEval = modalEval glEvalHandler
 
 glEvalStandard :: ModalFormula v -> Bool
-glEvalStandard formula = glEval formula !! maxModalDepth formula
+glEvalStandard f = glEval f !! maxModalDepth f
+
 
 simplifiedMaxDepth :: ModalFormula v -> Int
 simplifiedMaxDepth formula =
@@ -373,6 +369,14 @@ generalGLEvalSeq formulaMap = map level [0..]
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
 
+-- TODO: I'm not entirely sure that this generates enough frames. Is
+-- maxModalDepth supposed to be the point after which it has definitely
+-- converged? Or is it merely the case that once the formula has kept the same
+-- answer for maxModalDepth frames it can't change it any more? In the latter
+-- case, this function might not generate frames all the way out to
+-- stabilization.
+-- (glEvalStandard treats maxModalDepth as if the former is the case, but
+-- findFixpoint treats maxModalDepth as if the latter is the case.)
 kripkeFrames :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
 kripkeFrames formulaMap = M.map (take $ 1 + maxFormulaDepth) results where
   results = generalFixpointGLEval formulaMap

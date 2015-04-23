@@ -80,38 +80,48 @@ trueFormula = snd . trueEquation
 evalProgram :: (Ord a, Enum a) => ModalProgram a a -> a
 evalProgram = fst . trueEquation
 
--- Takes a question about the true formula (as a function from formulas to
--- formulas) and answers it (by evaluating it given how all the action formulas
--- are actually valued).
+-- These query tools let you ask questions about the true formula of a modal program.
+-- The simple version evaluates a single boolean query.
 query :: (Ord a, Enum a) => ModalProgram a a -> (ModalFormula a -> ModalFormula a) -> Bool
-query prog q = evalWithSoundnessAndAnswers answers (q f) where
-  answers = programBehavior prog
-  f = trueFormula prog
+query prog q = glEvalWithVarsStandard answers (q $ trueFormula prog) where
+  answers = generalFixpointGLEval $ progToMap prog
 
--- Lets you ask a number of additional questions about the true formula.
--- You give a map from a qurey type onto a way to transform the true formula
--- into a query formula, and this gives you back the map with answers to all
--- queries (along with the full program map, for convenience.)
-query' :: (Ord a, Ord q, Enum a) =>
-  ModalProgram a a -> Map q (ModalFormula a -> ModalFormula a) -> Map (Either q a) Bool
-query' prog queries = findGeneralGLFixpoint $ union qmap pmap where
-  f = trueFormula prog
-  qmap = mapKeysMonotonic Left $ Map.map (mapVariable Right . ($ f)) queries
+-- More complex versions allow you to pass in a map of queries and do things
+-- like generate all the kripke frames etc. This query map generator is common to those.
+queryMap :: (Ord a, Ord q, Enum a) =>
+	ModalProgram a a ->
+	Map q (ModalFormula a -> ModalFormula a) ->
+	Map (Either q a) (ModalFormula (Either q a))
+queryMap prog queries = union qmap pmap where
+  qmap = mapKeysMonotonic Left $ Map.map (mapVariable Right . ($ trueFormula prog)) queries
   pmap = mapKeysMonotonic Right $ Map.map (mapVariable Right) $ progToMap prog
 
--- Gives you a boolean answer to a single query about the true formula.
--- Example:
--- let q = (\f -> boxk 100 f)
--- query (escalatingUDT 0 (strangeverse 100) Beta) q
-query :: (Ord a, Enum a) => ModalProgram a a -> (ModalFormula a -> ModalFormula a) -> Bool
-query prog f = query' prog (insert () f empty) ! Left () where
+-- This lets you generate the relevant kripke frames for a series of queries
+-- alongside all the agent-action equations. Which means you can use
+-- displayKripkeFrames to print them all in a nice table.
+queryFrames :: (Ord a, Ord q, Enum a) =>
+  ModalProgram a a ->
+  Map q (ModalFormula a -> ModalFormula a) ->
+  Map (Either q a) [Bool]
+queryFrames prog queries = kripkeFrames $ queryMap prog queries
 
+-- This function basically lets you ask a bunch of queries at once, as long as
+-- you index them by an arbitrary query type and toss them in a map.
+query' :: (Ord a, Ord q, Enum a) =>
+  ModalProgram a a ->
+  Map q (ModalFormula a -> ModalFormula a) ->
+  Map (Either q a) Bool
+query' prog queries = findGeneralGLFixpoint $ queryMap prog queries
+
+
+-- UDT that does all its proofs in the same proof system.
 udt :: (Enum u, Ord a, Enum a) => Int -> ModalProgram a u -> a -> ModalProgram a a
 udt level univ dflt = modalProgram dflt $
   mFor $ \u ->
     mFor $ \a ->
       mIf (boxk level (Var a %> univ u)) (mReturn a)
 
+-- UDT that escalates its proof system by +1 for each action/outcome pair it reasons about.
 escalatingUDT :: (Enum u, Ord a, Enum a) => Int -> ModalProgram a u -> a -> ModalProgram a a
 escalatingUDT level univ dflt = modalProgram dflt mainLoop where
   mainLoop = mFor' (zip outcomeActionPairs [0..]) checkOutcomeAction
