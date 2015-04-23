@@ -373,6 +373,11 @@ generalGLEvalSeq formulaMap = map level [0..]
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
 
+kripkeFrames :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
+kripkeFrames formulaMap = M.map (take $ 1 + maxFormulaDepth) results where
+  results = generalFixpointGLEval formulaMap
+  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+
 findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
 findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
   results = generalGLEvalSeq formulaMap
