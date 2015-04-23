@@ -1,6 +1,8 @@
 module Games where
 import Modal
 import Programs
+import Data.Map hiding (map)
+import Text.Printf (printf)
 
 data FiveOrTen = Ten | Five deriving (Eq, Ord, Read, Enum)
 instance Show FiveOrTen where
@@ -20,10 +22,10 @@ instance Show NewcombAction where
 data NewcombOutcome = MillionThousand | Million | Thousand | Naught
   deriving (Eq, Ord, Read, Enum)
 instance Show NewcombOutcome where
-  show MillionThousand = "1001000"
-  show Million         = "1000000"
-  show Thousand        = "1000"
-  show Naught          = "0"
+  show MillionThousand = "$1001000"
+  show Million         = "$1000000"
+  show Thousand        = "$1000"
+  show Naught          = "$0"
 
 onebox, twobox :: ModalFormula NewcombAction
 onebox = Var OneBox
@@ -71,6 +73,10 @@ strangeverse k Three  = doesAlpha %^ boxk k doesBeta
 strangeverse _ Two = doesBeta
 strangeverse k One = doesAlpha %^ Neg (boxk k doesBeta)
 
+displayGame :: (Enum a, Ord a, Show a) => (a -> ModalProgram a a) -> IO ()
+displayGame prog = mapM_ display enumerate where
+  display dflt = printf "Default=%s → Action=%s\n" (show dflt) (show action) where
+    action = evalProgram $ prog dflt
 
 main :: IO ()
 main = do
