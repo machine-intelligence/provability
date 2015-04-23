@@ -3,8 +3,17 @@ import Control.Applicative hiding ((<|>))
 import Data.List
 import Data.Map (Map, (!))
 import qualified Data.Map as M
+import Display
 import Modal
+import Text.Printf (printf)
 
+-- AgentVar is stringly typed, which is kind of annoying, but this
+-- string-typing runs deep. Basically, we want to give ModalAgent an
+-- "environment" type (and, ideally, enforce that that environment only
+-- contains modal agents of lower rank) and do some shennanegans to ensure that
+-- we can only specify modal formulas that refer to modal agents of lesser
+-- rank. But that's hard (especially without dependent types), so we bite the
+-- bullet and resort to strings.
 data AgentVar = Me | Them | Agent String deriving (Eq, Ord)
 instance Show AgentVar where
   show Me = "a"
@@ -95,8 +104,8 @@ loopBreakDBot fbreak fdefect x cont = breakOut x `And` cont
 
 masqueBot n = MA ("masque" ++ show n) masque agentEvals
   where
-    agentEvals = (M.fromList [("db", defectBot), ("tbf", toughButFairBot)])
-    masque = loopBreakDBot (read "~ db") (read "db") n $
+    agentEvals = M.fromList [("dbot", defectBot), ("tbf", toughButFairBot)]
+    masque = loopBreakDBot (read "~ dbot") (read "dbot") n $
              loopBreakDBot (read "tbf") (read "~tbf") n $
              foldl1 Or (map (\k -> boxk k (read "b")) [0..n])
 
@@ -170,6 +179,17 @@ compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition age
 
 simpleCompete :: ModalFormula AgentVar -> ModalFormula AgentVar -> (Bool, Bool)
 simpleCompete f1 f2 = compete (simpleAgent f1) (simpleAgent f2)
+
+describeGame :: ModalAgent -> ModalAgent -> IO ()
+describeGame agent1 agent2 = do
+  let formulaMap = competition agent1 agent2
+  printf "%s vs %s\n\n" (agentName agent1) (agentName agent2)
+  displayMap formulaMap
+  displayKripkeFrames $ kripkeFrames formulaMap
+  let (score1, score2) = compete agent1 agent2
+  displayMap $ M.fromList [
+    (Agent $ agentName agent1, score1),
+    (Agent $ agentName agent2, score2)]
 
 -- Sanity checks
 

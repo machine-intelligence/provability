@@ -27,7 +27,7 @@ listmapToTable ks m = header : rows where
   header = "" : "│" : map show ks
   unpaddedCols = map (m !) ks
   cols = map (padr "" $ maximum $ map length unpaddedCols) unpaddedCols
-  rows = zipWith addNum [0..] (transpose cols)
+  rows = zipWith addNum [0 :: Int ..] (transpose cols)
   addNum n row = show n : "│" : row
 
 mapToTable :: (Ord k, Show k, Show v) => Map k v -> Table
@@ -40,9 +40,9 @@ squareUp' :: String -> String -> Table -> [[String]]
 squareUp' l r rows = map normalizeRow paddedRows where
   paddedRows = map (padr "" $ maxlen rows) rows
   maxlen = foldr (max . length) 0
-  normalizeRow row = zipWith normalizeCell [0..] row where
-    normalizeCell i c = l ++ (padl ' ' (colwidth i) c) ++ r
-  colwidth i = maximum [length $ r !! i | r <- paddedRows]
+  normalizeRow = zipWith normalizeCell [0..] where
+    normalizeCell i c = l ++ padl ' ' (colwidth i) c ++ r
+  colwidth i = maximum [length $ row !! i | row <- paddedRows]
 
 squareUp :: Table -> [[String]]
 squareUp = squareUp' " " " "

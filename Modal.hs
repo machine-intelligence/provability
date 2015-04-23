@@ -3,7 +3,7 @@ import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
 import Data.List
 import Data.Maybe
-import Data.Map (Map, (!))
+import Data.Map (Map)
 import qualified Data.Map as M
 import Text.Parsec
 import Text.Parsec.Expr
