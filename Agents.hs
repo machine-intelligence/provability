@@ -5,19 +5,23 @@ import Data.Map (Map, (!))
 import qualified Data.Map as M
 import Modal
 
-data Variable = V String deriving (Eq, Ord)
+data AgentVar = Me | Them | Agent String deriving (Eq, Ord)
+instance Show AgentVar where
+  show Me = "a"
+  show Them = "b"
+  show (Agent str) = str
+instance Read AgentVar where
+  readsPrec _ str = [(from name, rest) | not $ null name] where
+      name = takeWhile (`elem` '_' : ['a' .. 'z']) str
+      rest = dropWhile (`elem` '_' : ['a' .. 'z']) str
+      from "a" = Me
+      from "b" = Them
+      from str = Agent str
 
-instance Show Variable where show (V s) = s
-
-instance Read Variable where
-    readsPrec _ str = [(V name, rest) | not $ null name] where
-        name = takeWhile (`elem` '_' : ['a' .. 'z']) str
-        rest = dropWhile (`elem` '_' : ['a' .. 'z']) str
-
-data ModalAgent = MA { aname :: String,
-                       agentFormula :: ModalFormula Variable,
-                       helpers :: Map String ModalAgent }
-                  deriving (Eq,Show)
+data ModalAgent = MA { agentName :: String,
+                       agentFormula :: ModalFormula AgentVar,
+                       agentEvals :: Map String ModalAgent }
+                  deriving (Eq, Show)
 
 -- Bots
 -- A bot is represented as a modal formula in which:
@@ -36,10 +40,10 @@ isLegalBot = modalEval ModalEvaluator {
   handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
   handleBox = const True, handleDia = const True}
 
-simpleAgent :: ModalFormula Variable -> ModalAgent
+simpleAgent :: ModalFormula AgentVar -> ModalAgent
 simpleAgent formula = MA ("AGENT(" ++ show formula ++ ")") formula M.empty
 
-simpleNamedAgent :: String -> ModalFormula Variable -> ModalAgent
+simpleNamedAgent :: String -> ModalFormula AgentVar -> ModalAgent
 simpleNamedAgent name formula = MA name formula M.empty
 
 coopBot = simpleNamedAgent "coop" tt
@@ -59,11 +63,13 @@ waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
 almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
 simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
 
+prudentBot = MA "pbot" (read "[1] ~ dbot && []b") (M.fromList [("dbot", defectBot)])
 niceBot = MA "nice" (read "[] coop") (M.fromList [("coop", coopBot)])
 justBot = MA "just" (read "[] fair") (M.fromList [("fair", fairBot)])
 trollBot = MA "troll" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
-layeredBot :: String -> ModalFormula Variable -> Int -> ModalAgent
+
+layeredBot :: String -> ModalFormula AgentVar -> Int -> ModalAgent
 layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
   where
     cond k = Neg (boxk k base) `And` Neg (boxk k (Neg base))
@@ -75,10 +81,11 @@ layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
 
 toughButFairBotN = layeredBot "tbfair" (read "b")
 
-layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) { helpers = M.fromList [("dbot", defectBot)] }
+layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) {
+  agentEvals = M.fromList [("dbot", defectBot)] }
 
-loopBreakDBot :: ModalFormula Variable -> ModalFormula Variable ->
-                 Int -> ModalFormula Variable -> ModalFormula Variable
+loopBreakDBot :: ModalFormula AgentVar -> ModalFormula AgentVar ->
+                 Int -> ModalFormula AgentVar -> ModalFormula AgentVar
 loopBreakDBot fbreak fdefect x cont = breakOut x `And` cont
   where
     cond n = foldl1 And $ map (\k -> Neg (boxk k fbreak) `And` Neg (boxk k fdefect)) [0..n]
@@ -86,8 +93,9 @@ loopBreakDBot fbreak fdefect x cont = breakOut x `And` cont
     breakOut 0 = Box fbreak
     breakOut n = breakOut (n-1) `Or` (cond (n-1) `And` boxk n fbreak)
 
-masqueBot n = MA ("masque" ++ show n) masque (M.fromList [("db", defectBot), ("tbf", toughButFairBot)])
+masqueBot n = MA ("masque" ++ show n) masque agentEvals
   where
+    agentEvals = (M.fromList [("db", defectBot), ("tbf", toughButFairBot)])
     masque = loopBreakDBot (read "~ db") (read "db") n $
              loopBreakDBot (read "tbf") (read "~tbf") n $
              foldl1 Or (map (\k -> boxk k (read "b")) [0..n])
@@ -126,69 +134,41 @@ allFormulasTiered names = formulas where
 allFormulas :: [v] -> [ModalFormula v]
 allFormulas = concat . allFormulasTiered
 
-allBots :: [ModalFormula Variable]
-allBots = filter isLegalBot (allFormulas [V "a", V "b"])
+allBots :: [ModalFormula AgentVar]
+allBots = filter isLegalBot (allFormulas [Me, Them])
 
 -- How bots compete:
-mapVars :: (v -> v) -> ModalFormula v -> ModalFormula v
-mapVars f = modalEval idModalEvaluator { handleVar = Var . f }
+flipBot :: ModalFormula AgentVar -> ModalFormula AgentVar
+flipBot = mapVariable (\s -> if s == Me then Them else (if s == Them then Me else s))
 
-flipBot :: ModalFormula Variable -> ModalFormula Variable
-flipBot = mapVars (\s -> if s == V "a" then V "b" else (if s == V "b" then V "a" else s))
+vs, dot :: String -> String -> String
+x `vs` y = x ++ "(" ++ y ++ ")"
+x `dot` y = x ++ "." ++ y
 
-competitionNameCat :: String -> String -> String
-competitionNameCat name1 name2 = name1 ++ "_vs_" ++ name2
-
-competitionSloppyNames :: ModalAgent -> ModalAgent -> Map String (ModalFormula Variable)
-competitionSloppyNames na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2)
-  | n1 == n2 && na1 /= na2 = error "Different agents competing with same names"
+competition :: ModalAgent -> ModalAgent -> Map AgentVar (ModalFormula AgentVar)
+competition a1@(MA n1 f1 vs1) a2@(MA n2 f2 vs2)
+  | n1 == n2 && a1 /= a2 = competition a1{agentName=n1 ++ "1"} a2{agentName=n2 ++ "2"}
   | otherwise = top `M.union` left `M.union` right
   where
-    ncat = competitionNameCat
-    top = M.fromList [ (ncat n1 n2, renameFormula a1 n1 n2), (ncat n2 n1, renameFormula a2 n2 n1) ]
-
-    left  = M.unions [ competitionSloppyNames na2 (rename nha1) | nha1 <- M.toList helpers1 ]
-    right = M.unions [ competitionSloppyNames na1 (rename nha2) | nha2 <- M.toList helpers2 ]
-
-    rename (name,agent) = agent { aname = name }
-
-    renameFormula :: ModalFormula Variable -> String -> String -> ModalFormula Variable
-    renameFormula formula myName oppName = mapVars f formula
+    top = M.fromList [
+      (Agent $ n1 `vs` n2, makeNamesExplicit n1 n2 f1),
+      (Agent $ n2 `vs` n1, makeNamesExplicit n2 n1 f2)]
+    left = M.unions [ competition a2 ax{agentName=n1 `dot` nx} | (nx, ax) <- M.toList vs1]
+    right = M.unions [competition a1 ax{agentName=n2 `dot` nx} | (nx, ax) <- M.toList vs2]
+    makeNamesExplicit myName theirName = mapVariable expandName
       where
-        f (V "a") = V $ ncat myName oppName
-        f (V "b") = V $ ncat oppName myName
-        f (V   x) = V $ ncat oppName x
-
-competition :: ModalAgent -> ModalAgent -> Map Variable (ModalFormula Variable)
-competition na1@(MA n1 a1 helpers1) na2@(MA n2 a2 helpers2)
-  | n1 == n2 && na1 /= na2 = error "Different agents competing with same names"
-  | otherwise = top `M.union` left `M.union` right
-  where
-    ncat = competitionNameCat
-    scat n sn = n ++ "." ++ sn
-
-    top = M.fromList [ (V $ ncat n1 n2, renameFormula a1 n1 n2), (V $ ncat n2 n1, renameFormula a2 n2 n1) ]
-
-    left  = M.unions [ competition na2 (rename n1 nha1) | nha1 <- M.toList helpers1 ]
-    right = M.unions [ competition na1 (rename n2 nha2) | nha2 <- M.toList helpers2 ]
-
-    rename superName (name,agent) = agent { aname = scat superName name }
-
-    renameFormula formula myName oppName = mapVars f formula
-      where
-        f (V "a") = V $ ncat myName oppName
-        f (V "b") = V $ ncat oppName myName
-        f (V   x) = V $ ncat oppName x
+        expandName Me = Agent $ myName `vs` theirName
+        expandName Them = Agent $ theirName `vs` myName
+        expandName (Agent x) = Agent $ theirName `vs` (myName `dot` x)
 
 compete :: ModalAgent -> ModalAgent -> (Bool, Bool)
 compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition agent1 agent2
   where
-    n1 = aname agent1
-    n2 = aname agent2
-    ncat = competitionNameCat
-    simplifyOutput map = (map ! (V $ ncat n1 n2), map ! (V $ ncat n2 n1))
+    n1v2 = Agent $ agentName agent1 `vs` agentName agent2
+    n2v1 = Agent $ agentName agent2 `vs` agentName agent1
+    simplifyOutput map = (map ! n1v2, map ! n2v1)
 
-simpleCompete :: ModalFormula Variable -> ModalFormula Variable -> (Bool, Bool)
+simpleCompete :: ModalFormula AgentVar -> ModalFormula AgentVar -> (Bool, Bool)
 simpleCompete f1 f2 = compete (simpleAgent f1) (simpleAgent f2)
 
 -- Sanity checks
@@ -199,16 +179,16 @@ allPairs l = [ (a,b) | (a,bs) <- zip l (tail $ inits l), b <- bs ]
 allPairsSym :: [a] -> [(a,a)]
 allPairsSym l = [ x | ini <- inits l, x <- zip ini (reverse ini) ]
 
-isSuckerPunched :: ModalFormula Variable -> ModalFormula Variable -> Bool
+isSuckerPunched :: ModalFormula AgentVar -> ModalFormula AgentVar -> Bool
 isSuckerPunched bot1 bot2 = simpleCompete bot1 bot2 == (True, False)
 
-isMutualCoop :: ModalFormula Variable -> ModalFormula Variable -> Bool
+isMutualCoop :: ModalFormula AgentVar -> ModalFormula AgentVar -> Bool
 isMutualCoop bot1 bot2 = simpleCompete bot1 bot2 == (True, True)
 
-mutualCooperations :: [(ModalFormula Variable, ModalFormula Variable)]
+mutualCooperations :: [(ModalFormula AgentVar, ModalFormula AgentVar)]
 mutualCooperations = filter (uncurry isMutualCoop) (allPairs allBots)
 
-suckerPayoffs :: [(ModalFormula Variable, ModalFormula Variable)]
+suckerPayoffs :: [(ModalFormula AgentVar, ModalFormula AgentVar)]
 suckerPayoffs = filter (uncurry isSuckerPunched) (allPairsSym allBots)
 
 sortUniq :: Ord a => [a] -> [a]
@@ -220,23 +200,23 @@ sortUniq l = case sort l of
       snub x (y:ys) | x /= y    = x : snub y ys
                     | otherwise = snub x ys
 
-niceBots :: Int -> [ModalFormula Variable]
+niceBots :: Int -> [ModalFormula AgentVar]
 niceBots n = sortUniq [f c | c <- take n mutualCooperations, f <- [fst, snd]]
 
-exploitableBots :: Int -> [ModalFormula Variable]
+exploitableBots :: Int -> [ModalFormula AgentVar]
 exploitableBots n = sortUniq [fst c | c <- take n suckerPayoffs]
 
 -- Does any bot ever sucker punch this one?
-checkSucker :: ModalFormula Variable -> Int -> Maybe (ModalFormula Variable)
+checkSucker :: ModalFormula AgentVar -> Int -> Maybe (ModalFormula AgentVar)
 checkSucker bot n = find (isSuckerPunched bot) (take n allBots)
 
 -- Did a niceBot ever defect against us?
-checkNiceBots :: ModalFormula Variable -> Int -> Maybe (ModalFormula Variable)
+checkNiceBots :: ModalFormula AgentVar -> Int -> Maybe (ModalFormula AgentVar)
 checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
   defectsAgainstMe bot' = not $ snd $ simpleCompete bot bot'
 
 -- Did this bot ever fail to exploit a suckerBot?
 
-checkExploitableBots :: ModalFormula Variable -> Int -> Maybe (ModalFormula Variable)
+checkExploitableBots :: ModalFormula AgentVar -> Int -> Maybe (ModalFormula AgentVar)
 checkExploitableBots bot n = find notSuckered (exploitableBots n) where
   notSuckered bot' = not $ isSuckerPunched bot' bot
