@@ -62,15 +62,13 @@ programBehavior = findGeneralGLFixpoint . progToMap
 -- A map of actions for which the action equation is true.
 -- (Only one of these should be the case, if the program is p.m.e.e.)
 trueEquations :: (Ord a, Enum a) => ModalProgram a a -> Map a (ModalFormula a)
-trueEquations prog = filterWithKey (\k _ -> fixpointmap ! k) progmap where
-  fixpointmap = findGeneralGLFixpoint progmap
-  progmap = progToMap prog
+trueEquations prog = filterWithKey (\k _ -> programBehavior prog ! k) (progToMap prog)
 
 -- The action/formula pair for the equation that is true.
 -- (Errors if the program is not p.m.e.e.)
 trueEquation :: (Ord a, Enum a) => ModalProgram a a -> (a, ModalFormula a)
 trueEquation prog = case toList $ trueEquations prog of
-  []  -> error "No action taken! Program was not p.m.e.e."
+  [ ] -> error "No action taken! Program was not p.m.e.e."
   [x] -> x
   _   -> error "Multiple actions taken! Program was not p.m.e.e."
 
