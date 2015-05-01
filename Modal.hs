@@ -65,8 +65,8 @@ boxk :: Int -> ModalFormula v -> ModalFormula v
 boxk k phi = Box (holdsk k phi)
 
 -- <1> a is NOT the same as ~[1]~ a.
--- The former is ~[]~ (~[]F -> phi)
--- The latter is ~[] (~[]F -> ~phi)
+-- One is ~[]~ ([]F -> phi)
+-- The other is ~[] (~[]F -> ~phi)
 diak :: Int -> ModalFormula v -> ModalFormula v
 diak k phi = Dia (holdsk k phi)
 
