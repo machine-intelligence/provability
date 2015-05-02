@@ -293,7 +293,7 @@ simplify = modalEval simplifyHandler
 glEvalHandler :: ModalEvaluator v [Bool]
 glEvalHandler = ModalEvaluator {
     handleVal = repeat,
-	handleVar = error "Variables are not supported in GLEval",
+    handleVar = error "Variables are not supported in GLEval",
     handleNeg = fmap not,
     handleAnd = zipWith (&&),
     handleOr  = zipWith (||),
@@ -306,7 +306,7 @@ glEvalHandler = ModalEvaluator {
 -- an Ord constraint on v unnecessarily.
 glEvalHandlerWithVars :: Ord v => Map v [Bool] -> ModalEvaluator v [Bool]
 glEvalHandlerWithVars m = glEvalHandler{
-	handleVar = fromMaybe (error "Unmapped variable in GLEval") . (`M.lookup` m)}
+    handleVar = fromMaybe (error "Unmapped variable in GLEval") . (`M.lookup` m)}
 
 glEvalWithVars :: Ord v => Map v [Bool] -> ModalFormula v -> [Bool]
 glEvalWithVars = modalEval . glEvalHandlerWithVars
