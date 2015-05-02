@@ -35,8 +35,8 @@ data ModalAgent = MA { agentName :: String,
 -- Bots
 -- A bot is represented as a modal formula in which:
 --  - The box represents provability
---  - The variable "A" represents whether this bot cooperates against its opponent
---  - The variable "B" represents whether the opponent cooperates with us.
+--  - The variable "a" represents whether this bot cooperates against its opponent
+--  - The variable "b" represents whether the opponent cooperates with us.
 
 -- Some Bots:
 
