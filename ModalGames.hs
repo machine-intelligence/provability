@@ -1,10 +1,9 @@
-module Games where
-import Display
-import Modal
-import Programs
+module ModalGames where
 import Data.Map hiding (map)
-import qualified Data.Map as Map
-import Text.Printf (printf)
+import Display
+import ModalFormulas
+import ModalGameTools
+import ModalPrograms
 
 data FiveOrTen = Ten | Five deriving (Eq, Ord, Read, Enum)
 instance Show FiveOrTen where
@@ -29,25 +28,25 @@ instance Show NewcombOutcome where
   show Thousand        = "$1000"
   show Naught          = "$0"
 
-onebox, twobox :: ModalFormula OneOrTwo
-onebox = Var OneBox
-twobox = Neg onebox
+oneboxes, twoboxes :: ModalFormula OneOrTwo
+oneboxes = Var OneBox
+twoboxes = Neg oneboxes
 
 newcomb :: Int -> ModalProgram OneOrTwo NewcombOutcome
-newcomb k MillionThousand = twobox %^      boxk k onebox
-newcomb k Million         = onebox %^      boxk k onebox
-newcomb k Thousand        = twobox %^ Neg (boxk k onebox)
-newcomb k Naught          = onebox %^ Neg (boxk k onebox)
+newcomb k MillionThousand = twoboxes %^      boxk k oneboxes
+newcomb k Million         = oneboxes %^      boxk k oneboxes
+newcomb k Thousand        = twoboxes %^ Neg (boxk k oneboxes)
+newcomb k Naught          = oneboxes %^ Neg (boxk k oneboxes)
 
 
-data AorB = A_| B_ deriving (Eq, Ord, Read, Enum)
+data AorB = A| B deriving (Eq, Ord, Read, Enum)
 instance Show AorB where
-  show A_ = "A"
-  show B_ = "B"
+  show A = "A"
+  show B = "B"
 data GoodOrBad = Good | Bad deriving (Eq, Ord, Show, Read, Enum)
 
 doesA, doesB :: ModalFormula AorB
-doesA = Var A_
+doesA = Var A
 doesB = Neg doesA
 
 aGame :: Int -> ModalProgram AorB GoodOrBad
@@ -58,9 +57,9 @@ bGame :: Int -> ModalProgram AorB GoodOrBad
 bGame k Good = boxk k doesB
 bGame k Bad  = Neg (boxk k doesB)
 
-testAgent :: ModalProgram AorB GoodOrBad -> ModalProgram AorB AorB
-testAgent univ A_ = Box $ Var A_ %> univ Good
-testAgent univ B_ = Neg $ Box $ Var A_ %> univ Good
+abAgent :: ModalProgram AorB GoodOrBad -> ModalProgram AorB AorB
+abAgent univ A = Box $ Var A %> univ Good
+abAgent univ B = Neg $ Box $ Var A %> univ Good
 
 
 data Strangeverse = Three | Two | One deriving (Eq, Ord, Read, Enum)
@@ -101,7 +100,7 @@ prisonersDilemma DD = And (Var $ Left D) (Var $ Right D)
 prisonersDilemma CD = And (Var $ Left C) (Var $ Right D)
 
 pdGameMap :: Map (U2 PD CorD CorD) (ModalFormula (U2 PD CorD CorD))
-pdGameMap = u2GameMap prisonersDilemma udtA udtB where
+pdGameMap = gameMap2 prisonersDilemma udtA udtB where
   udtA = udt' [DC, CC, DD, CD] [D, C] D
   udtB = udt' [CD, CC, DD, DC] [D, C] D
 
@@ -110,11 +109,14 @@ main :: IO ()
 main = do
   putStrLn "In Newcomb's problem, if the predictor uses a box to predict"
   putStrLn "the agent's action, UDT takes whatever its default action was:"
-  displayU1 (newcomb 0) (udt OneBox)
-  displayU1 (newcomb 0) (udt TwoBox)
+  displayGame (newcomb 0) (udt OneBox)
+  displayGame (newcomb 0) (udt TwoBox)
   putStrLn ""
-  let newcombUDT0 = udt TwoBox :: ModalProgram (U1 NewcombOutcome OneOrTwo) OneOrTwo
-  putStrLn "These are the modal formulas true of UDT in Newcomb's problem:"
-  displayAgent newcombUDT0
   putStrLn "These are the modal formulas for UDT in the newcomb problem:"
-  displayMap $ u1GameMap (newcomb 0) (udt TwoBox)
+  displayMap $ gameMap (newcomb 0) (udt TwoBox)
+  putStrLn ""
+  putStrLn "Time for the five and ten game!"
+  displayGame fiveAndTen (udt Five)
+  putStrLn ""
+  putStrLn "These are the modal formulas for UDT in the 5-and-10 game:"
+  displayMap $ gameMap fiveAndTen (udt Five)

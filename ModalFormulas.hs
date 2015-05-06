@@ -1,9 +1,10 @@
-module Modal where
+module ModalFormulas where
 import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
 import Data.List
 import Data.Maybe
 import Data.Map (Map)
+import Display
 import qualified Data.Map as M
 import Text.Parsec
 import Text.Parsec.Expr
@@ -379,6 +380,12 @@ generalGLEvalSeq formulaMap = map level [0..]
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
 
+findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
+findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
+  results = generalGLEvalSeq formulaMap
+  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+
+-- Display code to help visualize the kripke frames
 kripkeFrames :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
 kripkeFrames formulaMap = M.map (take (2 + fixPointer)) results where
   results = generalFixpointGLEval formulaMap
@@ -386,7 +393,10 @@ kripkeFrames formulaMap = M.map (take (2 + fixPointer)) results where
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
   fixPointer = fixpointDepth (1 + maxFormulaDepth) mapList
 
-findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
-findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
-  results = generalGLEvalSeq formulaMap
-  maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+displayKripkeFrames' :: (Show k, Ord k) => [k] -> Map k (ModalFormula k) -> IO ()
+displayKripkeFrames' ks = displayTable . toTable . kripkeFrames where
+  toTable m = listmapToTable ks $ M.map (map boolify) m
+  boolify = show . (Val :: Bool -> ModalFormula ())
+
+displayKripkeFrames :: (Show k, Ord k) => Map k (ModalFormula k) -> IO ()
+displayKripkeFrames m = displayKripkeFrames' (M.keys m) m

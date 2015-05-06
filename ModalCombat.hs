@@ -1,10 +1,10 @@
-module Agents where
+module ModalCombat where
 import Control.Applicative hiding ((<|>))
 import Data.List
 import Data.Map (Map, (!))
 import qualified Data.Map as M
 import Display
-import Modal
+import ModalFormulas
 import Text.Printf (printf)
 
 -- AgentVar is stringly typed, which is kind of annoying, but this
@@ -181,16 +181,22 @@ compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition age
 simpleCompete :: ModalFormula AgentVar -> ModalFormula AgentVar -> (Bool, Bool)
 simpleCompete f1 f2 = compete (simpleAgent f1) (simpleAgent f2)
 
-describeGame :: ModalAgent -> ModalAgent -> IO ()
-describeGame agent1 agent2 = do
-  let formulaMap = competition agent1 agent2
-  printf "%s vs %s\n\n" (agentName agent1) (agentName agent2)
-  displayMap formulaMap
-  displayKripkeFrames formulaMap
+displayCompetition :: ModalAgent -> ModalAgent -> IO ()
+displayCompetition agent1 agent2 = do
   let (score1, score2) = compete agent1 agent2
-  displayMap $ M.fromList [
-    (Agent $ agentName agent1, score1),
-    (Agent $ agentName agent2, score2)]
+  printf "%s vs %s:\n" (agentName agent1) (agentName agent2)
+  printf "  %s %s\n" (agentName agent1) (if score1 then "cooperates" else "defects")
+  printf "  %s %s\n" (agentName agent2) (if score2 then "cooperates" else "defects")
+
+describeCompetition :: ModalAgent -> ModalAgent -> IO ()
+describeCompetition agent1 agent2 = do
+  displayCompetition agent1 agent2
+  putStrLn ""
+  let formulaMap = competition agent1 agent2
+  putStrLn "Formulas:"
+  displayMap' 2 formulaMap
+  putStrLn ""
+  displayKripkeFrames formulaMap
 
 -- Sanity checks
 
@@ -241,3 +247,9 @@ checkNiceBots bot n = find defectsAgainstMe (niceBots n) where
 checkExploitableBots :: ModalFormula AgentVar -> Int -> Maybe (ModalFormula AgentVar)
 checkExploitableBots bot n = find notSuckered (exploitableBots n) where
   notSuckered bot' = not $ isSuckerPunched bot' bot
+
+main :: IO ()
+main = do
+  displayCompetition fairBot fairBot
+  displayCompetition prudentBot fairBot
+  describeCompetition prudentBot fairBot

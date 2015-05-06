@@ -1,8 +1,8 @@
 module Display where
-import Modal
-import Data.Map (Map, (!), keys, toAscList)
-import qualified Data.Map as Map
 import Data.List (transpose)
+import Data.Map hiding (map, foldr)
+import qualified Data.Map as Map
+import Text.Printf (printf)
 
 type Table = [[String]]
 
@@ -11,16 +11,6 @@ padr x n xs = xs ++ replicate (n - length xs) x
 
 padl :: a -> Int -> [a] -> [a]
 padl x n xs = replicate (n - length xs) x ++ xs
-
-modalBool :: Bool -> String
-modalBool True = "⊤"
-modalBool False = "⊥"
-
-kripkeTable' :: (Show k, Ord k) => [k] -> Map k [Bool] -> Table
-kripkeTable' ks m = listmapToTable ks $ Map.map (map modalBool) m
-
-kripkeTable :: (Show k, Ord k) => Map k [Bool] -> Table
-kripkeTable m = kripkeTable' (keys m) m
 
 listmapToTable :: (Show k, Ord k) => [k] -> Map k [String] -> Table
 listmapToTable [] _ = []
@@ -34,8 +24,15 @@ listmapToTable ks m = header : rows where
 mapToTable :: (Ord k, Show k, Show v) => Map k v -> Table
 mapToTable = map (\(k, v) -> [show k, ": ", show v]) . toAscList
 
+displayMap' :: (Ord k, Show k, Show v) => Int -> Map k v -> IO ()
+displayMap' indent m = mapM_ (uncurry showLine) squaredLines where
+	spaces = replicate indent ' '
+	showLine label val = printf "%s%s : %s\n" spaces label (show val)
+	squaredLines = [(padr ' ' maxwidth (show k), v) | (k, v) <- toAscList m]
+	maxwidth = foldWithKey (\k v n -> max (length $ show k) n) 0 m
+
 displayMap :: (Ord k, Show k, Show v) => Map k v -> IO ()
-displayMap = displayTable . mapToTable
+displayMap = displayMap' 0
 
 squareUp' :: String -> String -> Table -> [[String]]
 squareUp' l r rows = map normalizeRow paddedRows where
@@ -53,9 +50,3 @@ renderTable table = unlines $ map concat (squareUp table)
 
 displayTable :: Table -> IO ()
 displayTable = putStrLn . renderTable
-
-displayKripkeFrames' :: (Show k, Ord k) => [k] -> Map k (ModalFormula k) -> IO ()
-displayKripkeFrames' ks = displayTable . kripkeTable' ks . kripkeFrames
-
-displayKripkeFrames :: (Show k, Ord k) => Map k (ModalFormula k) -> IO ()
-displayKripkeFrames m = displayKripkeFrames' (keys m) m
