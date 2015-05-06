@@ -55,28 +55,28 @@ simpleAgent formula = MA ("AGENT(" ++ show formula ++ ")") formula M.empty
 simpleNamedAgent :: String -> ModalFormula AgentVar -> ModalAgent
 simpleNamedAgent name formula = MA name formula M.empty
 
-coopBot = simpleNamedAgent "coop" tt
-defectBot = simpleNamedAgent "dbot" ff
-fairBot = simpleNamedAgent "fair" $ read "[] b"
-fairBot1 = simpleNamedAgent "fair1" $ read "[1] b"
-fairBot1' = simpleNamedAgent "fair1'" $ read "[] ([] F -> b)"
-fairBot2 = simpleNamedAgent "fair2" $ read "[2] b"
-fairBot3 = simpleNamedAgent "fair3" $ read "[3] b"
-fairBot4 = simpleNamedAgent "fair4" $ read "[4] b"
-fairBot5 = simpleNamedAgent "fair5" $ read "[5] b"
-toughButFairBot = simpleNamedAgent "tbfair" $ read "[] b || (<> b && [1] b) || (<> b && <1> b && [2] b)"
-reverseFairBot = simpleNamedAgent "rfair" $ read "(~ [] ~ b) && [] b"
-magicBot = simpleNamedAgent "magic" $ read "[1]([] a -> b)"
-waitBot = simpleNamedAgent "wait" $ read "~ [] F && [1] b "
-waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
+coopBot = simpleNamedAgent "CB" tt
+defectBot = simpleNamedAgent "DB" ff
+fairBot = simpleNamedAgent "FB" $ read "[] b"
+fairBot1 = simpleNamedAgent "FB[1]" $ read "[1] b"
+fairBot1' = simpleNamedAgent "FB[1]'" $ read "[] ([] F -> b)"
+fairBot2 = simpleNamedAgent "FB[2]" $ read "[2] b"
+fairBot3 = simpleNamedAgent "FB[3]" $ read "[3] b"
+fairBot4 = simpleNamedAgent "FB[4]" $ read "[4] b"
+fairBot5 = simpleNamedAgent "FB[5]" $ read "[5] b"
+toughButFairBot = simpleNamedAgent "TbFB" $ read "[] b || (<> b && [1] b) || (<> b && <1> b && [2] b)"
+reverseFairBot = simpleNamedAgent "rFB" $ read "(~ [] ~ b) && [] b"
+magicBot = simpleNamedAgent "MB" $ read "[1]([] a -> b)"
+waitBot = simpleNamedAgent "WB" $ read "~ [] F && [1] b "
+waitBot2 = simpleNamedAgent "WB2" $ read "~ ([] a) && ([] ~a || [1] b)"
 almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
-simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
-indignationBot = simpleNamedAgent "indignant" $ read "~ ([] (a -> ~ b))"
+simpleMagicBot = simpleNamedAgent "sMB" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
+indignationBot = simpleNamedAgent "IB" $ read "~ ([] (a -> ~ b))"
 
-prudentBot = MA "pbot" (read "[1] ~ dbot && []b") (M.fromList [("dbot", defectBot)])
-niceBot = MA "nice" (read "[] coop") (M.fromList [("coop", coopBot)])
-justBot = MA "just" (read "[] fair") (M.fromList [("fair", fairBot)])
-trollBot = MA "troll" (read "[] dbot") (M.fromList [("dbot", defectBot)])
+prudentBot = MA "PB" (read "[1] ~ dbot && []b") (M.fromList [("dbot", defectBot)])
+niceBot = MA "NB" (read "[] coop") (M.fromList [("coop", coopBot)])
+justBot = MA "JB" (read "[] fair") (M.fromList [("fair", fairBot)])
+trollBot = MA "TB" (read "[] dbot") (M.fromList [("dbot", defectBot)])
 
 
 layeredBot :: String -> ModalFormula AgentVar -> Int -> ModalAgent
@@ -89,9 +89,9 @@ layeredBot name base n = MA (name ++ show n) (thebot n) M.empty
 
     thebot k = foldl1 Or (map level [0..k])
 
-toughButFairBotN = layeredBot "tbfair" (read "b")
+toughButFairBotN = layeredBot "TbFB" (read "b")
 
-layeredCheckBot n = (layeredBot "check" (read "~ dbot && b") n) {
+layeredCheckBot n = (layeredBot "✓B" (read "~ dbot && b") n) {
   agentEvals = M.fromList [("dbot", defectBot)] }
 
 loopBreakDBot :: ModalFormula AgentVar -> ModalFormula AgentVar ->
@@ -103,7 +103,7 @@ loopBreakDBot fbreak fdefect x cont = breakOut x `And` cont
     breakOut 0 = Box fbreak
     breakOut n = breakOut (n-1) `Or` (cond (n-1) `And` boxk n fbreak)
 
-masqueBot n = MA ("masque" ++ show n) masque agentEvals
+masqueBot n = MA ("?B" ++ show n) masque agentEvals
   where
     agentEvals = M.fromList [("dbot", defectBot), ("tbf", toughButFairBot)]
     masque = loopBreakDBot (read "~ dbot") (read "dbot") n $
@@ -119,7 +119,7 @@ masqueBot n = MA ("masque" ++ show n) masque agentEvals
 -- higher and higher levels of fair bots. Generally, the number in the
 -- second box should be at least 1 higher than the one in the first
 -- bot.
-checkBot = MA "check" f (M.fromList [("dbot", defectBot)])
+checkBot = MA "✓B" f (M.fromList [("dbot", defectBot)])
   where
     f = read "[] b && [1] ~ dbot"
 
@@ -251,5 +251,4 @@ checkExploitableBots bot n = find notSuckered (exploitableBots n) where
 main :: IO ()
 main = do
   displayCompetition fairBot fairBot
-  displayCompetition prudentBot fairBot
   describeCompetition prudentBot fairBot
