@@ -71,6 +71,7 @@ waitBot = simpleNamedAgent "wait" $ read "~ [] F && [1] b "
 waitBot2 = simpleNamedAgent "wait2" $ read "~ ([] a) && ([] ~a || [1] b)"
 almostMagicBot = simpleNamedAgent "amb" $ read "~ [1]([] ~ a -> b) && [2] (~ [1]([] ~ a -> b) -> b)"
 simpleMagicBot = simpleNamedAgent "smagic" $ read "[] (<> a -> b)" -- Behaves exactly like magicBot
+indignationBot = simpleNamedAgent "indignant" $ read "~ ([] (a -> ~ b))"
 
 prudentBot = MA "pbot" (read "[1] ~ dbot && []b") (M.fromList [("dbot", defectBot)])
 niceBot = MA "nice" (read "[] coop") (M.fromList [("coop", coopBot)])
