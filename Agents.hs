@@ -185,7 +185,7 @@ describeGame agent1 agent2 = do
   let formulaMap = competition agent1 agent2
   printf "%s vs %s\n\n" (agentName agent1) (agentName agent2)
   displayMap formulaMap
-  displayKripkeFrames $ kripkeFrames formulaMap
+  displayKripkeFrames formulaMap
   let (score1, score2) = compete agent1 agent2
   displayMap $ M.fromList [
     (Agent $ agentName agent1, score1),

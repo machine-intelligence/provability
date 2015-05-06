@@ -1,4 +1,5 @@
 module Display where
+import Modal
 import Data.Map (Map, (!), keys, toAscList)
 import qualified Data.Map as Map
 import Data.List (transpose)
@@ -41,7 +42,7 @@ squareUp' l r rows = map normalizeRow paddedRows where
   paddedRows = map (padr "" $ maxlen rows) rows
   maxlen = foldr (max . length) 0
   normalizeRow = zipWith normalizeCell [0..] where
-    normalizeCell i c = l ++ padl ' ' (colwidth i) c ++ r
+    normalizeCell i c = l ++ padr ' ' (colwidth i) c ++ r
   colwidth i = maximum [length $ row !! i | row <- paddedRows]
 
 squareUp :: Table -> [[String]]
@@ -53,8 +54,8 @@ renderTable table = unlines $ map concat (squareUp table)
 displayTable :: Table -> IO ()
 displayTable = putStrLn . renderTable
 
-displayKripkeFrames' :: (Show k, Ord k) => [k] -> Map k [Bool] -> IO ()
-displayKripkeFrames' ks = displayTable . kripkeTable' ks
+displayKripkeFrames' :: (Show k, Ord k) => [k] -> Map k (ModalFormula k) -> IO ()
+displayKripkeFrames' ks = displayTable . kripkeTable' ks . kripkeFrames
 
-displayKripkeFrames :: (Show k, Ord k) => Map k [Bool] -> IO ()
+displayKripkeFrames :: (Show k, Ord k) => Map k (ModalFormula k) -> IO ()
 displayKripkeFrames m = displayKripkeFrames' (keys m) m

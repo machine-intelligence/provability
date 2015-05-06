@@ -95,17 +95,20 @@ modalEval m = f where
   f (Box x) = handleBox m (f x)
   f (Dia x) = handleDia m (f x)
 
-mappingModalEvaluator :: (v -> a) -> ModalEvaluator v (ModalFormula a)
-mappingModalEvaluator f = ModalEvaluator {
-  handleVar = Var . f, handleVal = Val, handleNeg = Neg,
+joiningModalEvaluator :: (v -> ModalFormula w) -> ModalEvaluator v (ModalFormula w)
+joiningModalEvaluator f = ModalEvaluator {
+  handleVar = f, handleVal = Val, handleNeg = Neg,
   handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
   handleBox = Box, handleDia = Dia }
 
+joinVariable :: (v -> ModalFormula v') -> ModalFormula v -> ModalFormula v'
+joinVariable = modalEval . joiningModalEvaluator
+
 mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
-mapVariable = modalEval . mappingModalEvaluator
+mapVariable f = joinVariable (Var . f)
 
 idModalEvaluator :: ModalEvaluator v (ModalFormula v)
-idModalEvaluator = mappingModalEvaluator id
+idModalEvaluator = joiningModalEvaluator Var
 
 instance Show v => Show (ModalFormula v) where
   showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
@@ -350,10 +353,17 @@ lengthAtLeast 0 _ = True
 lengthAtLeast _ [] = False
 lengthAtLeast n (_:xs) = lengthAtLeast (n-1) xs
 
+-- TODO: infinite loop
+fixpointDepth :: (Eq a) => Int -> [a] -> Int
+fixpointDepth n xs = 1 + countSkipped 0 (group xs) where
+  countSkipped acc [] = acc
+  countSkipped acc (g:gs)
+    | lengthAtLeast n g = acc
+    | otherwise = countSkipped (acc + length g) gs
+
 -- Find the fixpoint of a list, given a length of run after which we should conclude we found it.
 findFixpoint :: (Eq a) => Int -> [a] -> a
 findFixpoint n xs = (!!0) $ fromJust $ find (lengthAtLeast n) $ group xs
-
 
 -- Find the Fixpoint for a Modal formula
 findGLFixpoint :: Eq v => v -> ModalFormula v -> Bool
@@ -369,18 +379,12 @@ generalGLEvalSeq formulaMap = map level [0..]
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
 
--- TODO: I'm not entirely sure that this generates enough frames. Is
--- maxModalDepth supposed to be the point after which it has definitely
--- converged? Or is it merely the case that once the formula has kept the same
--- answer for maxModalDepth frames it can't change it any more? In the latter
--- case, this function might not generate frames all the way out to
--- stabilization.
--- (glEvalStandard treats maxModalDepth as if the former is the case, but
--- findFixpoint treats maxModalDepth as if the latter is the case.)
 kripkeFrames :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
-kripkeFrames formulaMap = M.map (take $ 1 + maxFormulaDepth) results where
+kripkeFrames formulaMap = M.map (take (2 + fixPointer)) results where
   results = generalFixpointGLEval formulaMap
+  mapList = generalGLEvalSeq formulaMap
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
+  fixPointer = fixpointDepth (1 + maxFormulaDepth) mapList
 
 findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
 findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
