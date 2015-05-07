@@ -1,7 +1,7 @@
-module ModalPrograms where
-import ModalFormulas
-import ModalGameTools
-import ModalProgramming
+module Modal.Programs where
+import Modal.Formulas
+import Modal.GameTools
+import Modal.Programming
 
 generalUDT :: Eq a => [Int] -> [u] -> [a] -> a -> ModalProgram (U1 u a) a
 generalUDT levels uorder aorder dflt = modalProgram dflt mainLoop where

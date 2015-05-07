@@ -1,4 +1,4 @@
-module Display where
+module Modal.Display where
 import Data.List (transpose)
 import Data.Map hiding (map, foldr)
 import qualified Data.Map as Map

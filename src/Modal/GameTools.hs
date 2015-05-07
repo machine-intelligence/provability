@@ -1,5 +1,5 @@
-module ModalGameTools where
-import ModalFormulas
+module Modal.GameTools where
+import Modal.Formulas
 import Data.Map hiding (map)
 import qualified Data.Map as Map
 import Text.Printf (printf)

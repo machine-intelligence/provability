@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module ModalEnvironment
+module Modal.Environment
   ( AgentVar(..)
   , Name
   , Env
@@ -31,7 +31,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
-import ModalFormulas hiding (left)
+import Modal.Formulas hiding (left)
 import Text.Printf (printf)
 
 (.:) :: (c -> x) -> (a -> b -> c) -> (a -> b -> x)

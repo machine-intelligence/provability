@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
-module ModalAgents where
-import ModalFormulas
-import ModalEnvironment
+module Modal.Agents where
+import Modal.Formulas
+import Modal.Environment
 
 layeredBot :: Int -> ModalFormula AgentVar -> ModalFormula AgentVar
 layeredBot n base = foldl1 Or (map level [0..n]) where

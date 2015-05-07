@@ -1,9 +1,9 @@
-module ModalGames where
+module Modal.Games where
 import Data.Map hiding (map)
-import Display
-import ModalFormulas
-import ModalGameTools
-import ModalPrograms
+import Modal.Display
+import Modal.Formulas
+import Modal.GameTools
+import Modal.Programs
 
 data FiveOrTen = Ten | Five deriving (Eq, Ord, Read, Enum)
 instance Show FiveOrTen where

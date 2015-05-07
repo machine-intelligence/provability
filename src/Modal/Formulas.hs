@@ -1,4 +1,4 @@
-module ModalFormulas where
+module Modal.Formulas where
 import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
 import Data.List
@@ -7,7 +7,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
-import Display
+import Modal.Display
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
