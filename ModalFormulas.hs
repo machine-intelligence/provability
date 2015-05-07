@@ -4,8 +4,10 @@ import Control.Arrow ((***))
 import Data.List
 import Data.Maybe
 import Data.Map (Map)
-import Display
 import qualified Data.Map as M
+import Data.Set (Set)
+import qualified Data.Set as S
+import Display
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
@@ -73,7 +75,7 @@ diak k phi = Dia (holdsk k phi)
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator v a = ModalEvaluator {
-    handleVal :: Bool -> a ,
+    handleVal :: Bool -> a,
     handleVar :: v -> a,
     handleNeg :: a -> a,
     handleAnd :: a -> a -> a,
@@ -98,7 +100,7 @@ modalEval m = f where
 
 joiningModalEvaluator :: (v -> ModalFormula w) -> ModalEvaluator v (ModalFormula w)
 joiningModalEvaluator f = ModalEvaluator {
-  handleVar = f, handleVal = Val, handleNeg = Neg,
+  handleVal = Val, handleVar = f, handleNeg = Neg,
   handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
   handleBox = Box, handleDia = Dia }
 
@@ -110,6 +112,15 @@ mapVariable f = joinVariable (Var . f)
 
 idModalEvaluator :: ModalEvaluator v (ModalFormula v)
 idModalEvaluator = joiningModalEvaluator Var
+
+allVarsModalEvaluator :: Ord v => ModalEvaluator v (Set v)
+allVarsModalEvaluator = ModalEvaluator {
+  handleVal = const S.empty, handleVar = S.singleton, handleNeg = id,
+  handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
+  handleBox = id, handleDia = id }
+
+allVars :: Ord v => ModalFormula v -> Set v
+allVars = modalEval allVarsModalEvaluator
 
 instance Show v => Show (ModalFormula v) where
   showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
