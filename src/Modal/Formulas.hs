@@ -110,15 +110,6 @@ allVars = modalEval ModalEvaluator {
   handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
   handleBox = id, handleDia = id }
 
-allVarsModalEvaluator :: Ord v => ModalEvaluator v (Set v)
-allVarsModalEvaluator = ModalEvaluator {
-  handleVal = const S.empty, handleVar = S.singleton, handleNeg = id,
-  handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
-  handleBox = id, handleDia = id }
-
-allVars :: Ord v => ModalFormula v -> Set v
-allVars = modalEval allVarsModalEvaluator
-
 instance Show v => Show (ModalFormula v) where
   showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
   showsPrec _ (Var v) = showString $ show v
