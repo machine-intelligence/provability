@@ -110,16 +110,42 @@ allVars = modalEval ModalEvaluator {
   handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
   handleBox = id, handleDia = id }
 
+data ShowFormula = ShowFormula {
+  topSymbol :: String,
+  botSymbol :: String,
+  negSymbol :: String,
+  andSymbol :: String,
+  orSymbol  :: String,
+  impSymbol :: String,
+  iffSymbol :: String,
+  boxSymbol :: String,
+  diaSymbol :: String
+  } deriving (Eq, Ord, Read, Show)
+
+showFormula :: Show v => ShowFormula -> ModalFormula v -> String
+showFormula sf f = showsFormula 0 f "" where
+  showsFormula p f = case f of
+    Val l -> showString $ if l then topSymbol sf else botSymbol sf
+    Var v -> showString $ show v
+    Neg x -> showParen (p > 8) $ showUnary (negSymbol sf) 8 x
+    And x y -> showParen (p > 7) $ showBinary (andSymbol sf) 7 x 8 y
+    Or  x y -> showParen (p > 6) $ showBinary (orSymbol sf) 6 x 7 y
+    Imp x y -> showParen (p > 5) $ showBinary (impSymbol sf) 6 x 5 y
+    Iff x y -> showParen (p > 4) $ showBinary (iffSymbol sf) 5 x 4 y
+    Box x -> showParen (p > 8) $ showUnary (boxSymbol sf) 8 x
+    Dia x -> showParen (p > 8) $ showUnary (diaSymbol sf) 8 x
+  padded o = showString " " . showString o . showString " "
+  showUnary o i x = showString o . showsFormula i x
+  showBinary o l x r y = showsFormula l x . padded o . showsFormula r y
+
+showUnicode :: Show v => ModalFormula v -> String
+showUnicode = showFormula (ShowFormula "⊤" "⊥" "¬" "∧" "∨" "→" "↔" "□" "◇")
+
+showAscii :: Show v => ModalFormula v -> String
+showAscii = showFormula (ShowFormula "T" "F" "~" "&&" "||" "->" "<->" "[]" "<>")
+
 instance Show v => Show (ModalFormula v) where
-  showsPrec _ (Val l) = showString $ if l then "⊤" else "⊥"
-  showsPrec _ (Var v) = showString $ show v
-  showsPrec p (Neg x) = showParen (p > 8) $ showString "¬" . showsPrec 8 x
-  showsPrec p (And x y) = showParen (p > 7) $ showsPrec 7 x . showString " ∧ " . showsPrec 8 y
-  showsPrec p (Or  x y) = showParen (p > 6) $ showsPrec 6 x . showString " ∨ " . showsPrec 7 y
-  showsPrec p (Imp x y) = showParen (p > 5) $ showsPrec 6 x . showString " → " . showsPrec 5 y
-  showsPrec p (Iff x y) = showParen (p > 4) $ showsPrec 5 x . showString " ↔ " . showsPrec 4 y
-  showsPrec p (Box x) = showParen (p > 8) $ showString "□" . showsPrec 8 x
-  showsPrec p (Dia x) = showParen (p > 8) $ showString "◇" . showsPrec 8 x
+  show = showUnicode
 
 --------------------------------------------------------------------------------
 
