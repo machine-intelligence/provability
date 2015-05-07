@@ -155,27 +155,27 @@ vs, dot :: String -> String -> String
 x `vs` y = x ++ "(" ++ y ++ ")"
 x `dot` y = x ++ "." ++ y
 
-competition :: ModalAgent -> ModalAgent -> Map AgentVar (ModalFormula AgentVar)
+competition :: ModalAgent -> ModalAgent -> Map String (ModalFormula String)
 competition a1@(MA n1 f1 vs1) a2@(MA n2 f2 vs2)
   | n1 == n2 && a1 /= a2 = competition a1{agentName=n1 ++ "1"} a2{agentName=n2 ++ "2"}
   | otherwise = top `M.union` left `M.union` right
   where
     top = M.fromList [
-      (Agent $ n1 `vs` n2, makeNamesExplicit n1 n2 f1),
-      (Agent $ n2 `vs` n1, makeNamesExplicit n2 n1 f2)]
-    left = M.unions [ competition a2 ax{agentName=n1 `dot` nx} | (nx, ax) <- M.toList vs1]
-    right = M.unions [competition a1 ax{agentName=n2 `dot` nx} | (nx, ax) <- M.toList vs2]
+      (n1 `vs` n2, makeNamesExplicit n1 n2 f1),
+      (n2 `vs` n1, makeNamesExplicit n2 n1 f2)]
+    left = M.unions [ competition a2 ax{agentName=nx} | (nx, ax) <- M.toList vs1]
+    right = M.unions [competition a1 ax{agentName=nx} | (nx, ax) <- M.toList vs2]
     makeNamesExplicit myName theirName = mapVariable expandName
       where
-        expandName Me = Agent $ myName `vs` theirName
-        expandName Them = Agent $ theirName `vs` myName
-        expandName (Agent x) = Agent $ theirName `vs` (myName `dot` x)
+        expandName Me = myName `vs` theirName
+        expandName Them = theirName `vs` myName
+        expandName (Agent x) = theirName `vs` x
 
 compete :: ModalAgent -> ModalAgent -> (Bool, Bool)
 compete agent1 agent2 = simplifyOutput $ findGeneralGLFixpoint $ competition agent1 agent2
   where
-    n1v2 = Agent $ agentName agent1 `vs` agentName agent2
-    n2v1 = Agent $ agentName agent2 `vs` agentName agent1
+    n1v2 = agentName agent1 `vs` agentName agent2
+    n2v1 = agentName agent2 `vs` agentName agent1
     simplifyOutput map = (map ! n1v2, map ! n2v1)
 
 simpleCompete :: ModalFormula AgentVar -> ModalFormula AgentVar -> (Bool, Bool)

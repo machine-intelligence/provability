@@ -67,11 +67,8 @@ holdsk k phi = Neg (incon k) `Imp` phi
 boxk :: Int -> ModalFormula v -> ModalFormula v
 boxk k phi = Box (holdsk k phi)
 
--- <1> a is NOT the same as ~[1]~ a.
--- One is ~[]~ ([]F -> phi)
--- The other is ~[] (~[]F -> ~phi)
 diak :: Int -> ModalFormula v -> ModalFormula v
-diak k phi = Dia (holdsk k phi)
+diak k phi = Neg $ Box (holdsk k $ Neg phi)
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator v a = ModalEvaluator {
@@ -98,20 +95,20 @@ modalEval m = f where
   f (Box x) = handleBox m (f x)
   f (Dia x) = handleDia m (f x)
 
-joiningModalEvaluator :: (v -> ModalFormula w) -> ModalEvaluator v (ModalFormula w)
-joiningModalEvaluator f = ModalEvaluator {
+joinVariable :: (v -> ModalFormula w) -> ModalFormula v -> ModalFormula w
+joinVariable f = modalEval $ ModalEvaluator {
   handleVal = Val, handleVar = f, handleNeg = Neg,
   handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
   handleBox = Box, handleDia = Dia }
 
-joinVariable :: (v -> ModalFormula v') -> ModalFormula v -> ModalFormula v'
-joinVariable = modalEval . joiningModalEvaluator
-
 mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
 mapVariable f = joinVariable (Var . f)
 
-idModalEvaluator :: ModalEvaluator v (ModalFormula v)
-idModalEvaluator = joiningModalEvaluator Var
+allVars :: Ord v => ModalFormula v -> Set v
+allVars = modalEval ModalEvaluator {
+  handleVal = const S.empty, handleVar = S.singleton, handleNeg = id,
+  handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
+  handleBox = id, handleDia = id }
 
 allVarsModalEvaluator :: Ord v => ModalEvaluator v (Set v)
 allVarsModalEvaluator = ModalEvaluator {
@@ -196,7 +193,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
       makeTokenParser emptyDef { commentStart = "{-"
                                , commentEnd = "-}"
                                , identStart = letter <|> char '_'
-                               , identLetter = letter <|> char '_'
+                               , identLetter = letter <|> char '_' <|> digit
                                , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
                                , opLetter = oneOf "->]&|123456789"
                                , reservedOpNames = [ "¬", "∧", "∨", "→", "↔", "□", "◇"
