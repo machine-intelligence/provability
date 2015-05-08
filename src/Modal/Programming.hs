@@ -1,6 +1,7 @@
 module Modal.Programming where
 import Modal.Formulas
 import Modal.GameTools
+import Modal.Utilities
 import Data.Map hiding (map)
 import qualified Data.Map as Map
 import Text.Printf (printf)

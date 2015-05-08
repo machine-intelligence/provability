@@ -1,8 +1,7 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 module Modal.Environment
-  ( AgentVar(..)
-  , Name
-  , Env
+  ( Env
   , nobody
   , participants
   , rankedParticipants
@@ -32,44 +31,33 @@ import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Modal.Formulas hiding (left)
+import Modal.GameTools hiding (left)
+import Modal.Utilities
+import Modal.Code
 import Text.Printf (printf)
 
-(.:) :: (c -> x) -> (a -> b -> c) -> (a -> b -> x)
-(.:) = (.) . (.)
-
-(.::) :: (d -> x) -> (a -> b -> c -> d) -> (a -> b -> c -> x)
-(.::) = (.) . (.) . (.)
+-- TODO: Generalize so that players can have different action types.
 
 die :: Show x => x -> IO a
 die = printf "Error: %s" . show
 
-type Name = Text
+type Action a = ModalVar a a
+type IsAct a = (Ord a, Enum a)
 
-vs :: Name -> Name -> Name
-x `vs` y = x <> "(" <> y <> ")"
+data VsVar a = Vs { player :: Name, playedOn :: Name, plays :: a } deriving (Eq, Ord)
+instance Show a => Show (VsVar a) where
+  show (Vs n1 n2 a) = printf "%s(%s)=%s" (Text.unpack n1) (Text.unpack n2) (show a)
 
-data AgentVar = MeVsThem | ThemVsMe | ThemVs Name deriving (Eq, Ord)
-instance Show AgentVar where
-  show MeVsThem = "Me(Them)"
-  show ThemVsMe = "Them(Me)"
-  show (ThemVs n) = "Them(" ++ Text.unpack n ++ ")"
-instance Read AgentVar where
-  readsPrec _ str = [(from name, rest) | not $ null name] where
-      name = takeWhile (`elem` '_' : ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']) str
-      rest = dropWhile (`elem` '_' : ['a' .. 'z'] ++ ['A' .. 'Z'] ++ ['0' .. '9']) str
-      from "a" = MeVsThem
-      from "b" = ThemVsMe
-      from  n  = ThemVs $ Text.pack n
-
-expandNames :: Name -> Name -> ModalFormula AgentVar -> ModalFormula Name
+expandNames :: Name -> Name -> ModalFormula (Action a) -> ModalFormula (VsVar a)
 expandNames me them = mapVariable expandName where
-  expandName MeVsThem = me `vs` them
-  expandName ThemVsMe = them `vs` me
-  expandName (ThemVs x) = them `vs` x
+  expandName (MeVsThemIs val) = Vs me them val
+  expandName (ThemVsMeIs val) = Vs them me val
+  expandName (ThemVsOtherIs other val) = Vs them other val
 
-subagents :: ModalFormula AgentVar -> Set Name
-subagents = Set.fromList . extractName . Set.toList . allVars where
-  extractName xs = [name | ThemVs name <- xs]
+subagents :: Enum a => Program a a -> Set Name
+subagents program = Set.unions [fSubagents $ program a | a <- enumerate] where
+  fSubagents = Set.fromList . extractName . allVars
+  extractName xs = [name | ThemVsOtherIs name _ <- xs]
 
 isModalized :: ModalFormula v -> Bool
 isModalized = modalEval ModalEvaluator {
@@ -77,21 +65,24 @@ isModalized = modalEval ModalEvaluator {
   handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
   handleBox = const True, handleDia = const True }
 
-newtype Env = Env { _participants :: Map Name (ModalFormula AgentVar, Int) }
-instance Show Env where
+isFullyModalized :: Enum a => Program a v -> Bool
+isFullyModalized program = all (isModalized . program) enumerate
+
+newtype Env a = Env { _participants :: Map Name (Program a a, Int) }
+instance Show (Env a) where
 	show (Env ps) = printf "(%s)" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
 
-nobody :: Env
+nobody :: Env a
 nobody = Env Map.empty
 
-participants :: Env -> Set Name
+participants :: Env a -> Set Name
 participants = Set.fromList . Map.keys . _participants
 
-rankedParticipants :: Env -> Map Name Int
+rankedParticipants :: Env a -> Map Name Int
 rankedParticipants = Map.map snd . _participants
 
-missingSubagents :: Env -> ModalFormula AgentVar -> Set Name
-missingSubagents env formula = subagents formula Set.\\ participants env
+missingSubagents :: IsAct a => Env a -> Program a a-> Set Name
+missingSubagents env program = subagents program Set.\\ participants env
 
 data EnvError
   = IsNotModalized Name
@@ -104,61 +95,66 @@ instance Show EnvError where
   show (MissingSubagents n ns) = printf "Unknown agents referenced by %s: %s"
     (Text.unpack n) (Text.unpack $ Text.intercalate ", " $ Set.toList ns)
 
-rankIn :: Env -> Name -> ModalFormula AgentVar -> Either EnvError Int
-rankIn env name formula = if null missings then Right rank else Left err where
+rankIn :: IsAct a => Env a -> Name -> Program a a -> Either EnvError Int
+rankIn env name program = if null missings then Right rank else Left err where
   err = MissingSubagents name (Set.fromList missings)
   rank = if null ranks then 0 else succ $ maximum ranks
-  (missings, ranks) = partitionEithers $ Set.toList $ Set.map lookupRank $ subagents formula
+  (missings, ranks) = partitionEithers $ Set.toList $ Set.map lookupRank $ subagents program
   lookupRank n = maybe (Left n) (Right . snd) $ Map.lookup n (_participants env)
 
-tryInsert :: Env -> Name -> ModalFormula AgentVar -> Either EnvError Env
-tryInsert env name formula = do
-  (unless $ isModalized formula) (Left $ IsNotModalized name)
+tryInsert :: IsAct a => Env a -> Name -> Program a a -> Either EnvError (Env a)
+tryInsert env name program = do
+  (unless $ isFullyModalized program) (Left $ IsNotModalized name)
   (when $ Map.member name $ _participants env) (Left $ NameCollision name)
-  rank <- rankIn env name formula
-  return $ Env $ Map.insert name (formula, rank) (_participants env)
+  rank <- rankIn env name program
+  return $ Env $ Map.insert name (program, rank) (_participants env)
 
-insert :: Env -> Name -> ModalFormula AgentVar -> IO Env
+insert :: IsAct a => Env a -> Name -> Program a a -> IO (Env a)
 insert = either die return .:: tryInsert
 
-forceInsert :: Env -> Name -> ModalFormula AgentVar -> Env
+forceInsert :: IsAct a => Env a -> Name -> Program a a -> Env a
 forceInsert = either (error . show) id .:: tryInsert
 
-(@+) :: Either EnvError Env -> (Name, ModalFormula AgentVar) -> Either EnvError Env
+(@+) :: IsAct a => Either EnvError (Env a) -> (Name, Program a a) -> Either EnvError (Env a)
 e @+ nf = e >>= (@< nf)
 
-(@<) :: Env -> (Name, ModalFormula AgentVar) -> Either EnvError Env
+(@<) :: IsAct a => Env a -> (Name, Program a a) -> Either EnvError (Env a)
 (@<) e = uncurry (tryInsert e)
 
-(@!) :: Env -> (Name, ModalFormula AgentVar) -> Env
+(@!) :: IsAct a => Env a -> (Name, Program a a) -> (Env a)
 (@!) e = uncurry (forceInsert e)
 
 data CompetitionError = UnknownPlayer Name deriving (Eq, Ord, Read, Show)
 
-type Competition = Map Name (ModalFormula Name)
+type Competition a = Map (VsVar a) (ModalFormula (VsVar a))
 
-tryCompetitionMap :: Env -> Name -> Name -> Either CompetitionError Competition
+tryCompetitionMap :: IsAct a =>
+  Env a -> Name -> Name -> Either CompetitionError (Competition a)
 tryCompetitionMap env name1 name2 = do
   let emap = _participants env
   let getPlayer n = maybe (Left $ UnknownPlayer n) (Right . fst) (Map.lookup n emap)
-  formula1 <- getPlayer name1
-  formula2 <- getPlayer name2
-  let top = [(name1 `vs` name2, expandNames name1 name2 formula1),
-             (name2 `vs` name1, expandNames name2 name1 formula2)]
-  lefts <- sequence [tryCompetitionMap env name2 x | x <- Set.toList $ subagents formula1]
-  rights <- sequence [tryCompetitionMap env name1 x | x <- Set.toList $ subagents formula2]
-  return $ Map.unions $ Map.fromList top : lefts ++ rights
+  program1 <- getPlayer name1
+  program2 <- getPlayer name2
+  let top1 = [(Vs name1 name2 a, expandNames name1 name2 (program1 a)) | a <- enumerate]
+  let top2 = [(Vs name2 name1 a, expandNames name2 name1 (program2 a)) | a <- enumerate]
+  lefts <- sequence [tryCompetitionMap env name2 x | x <- Set.toList $ subagents program1]
+  rights <- sequence [tryCompetitionMap env name1 x | x <- Set.toList $ subagents program2]
+  return $ Map.unions $ (Map.fromList top1) : (Map.fromList top2) : lefts ++ rights
 
-competitionMap :: Env -> Name -> Name -> IO Competition
+competitionMap :: IsAct a => Env a -> Name -> Name -> IO (Competition a)
 competitionMap = either die return .:: tryCompetitionMap
 
-forceCompetitionMap :: Env -> Name -> Name -> Competition
+forceCompetitionMap :: IsAct a => Env a -> Name -> Name -> (Competition a)
 forceCompetitionMap = either (error . show) id .:: tryCompetitionMap
 
-tryCompete :: Env -> Name -> Name -> Either CompetitionError (Bool, Bool)
+tryCompete :: IsAct a => Env a -> Name -> Name -> Either CompetitionError (a, a)
 tryCompete env name1 name2 = do
   fixpt <- findGeneralGLFixpoint <$> tryCompetitionMap env name1 name2
-  return (fixpt Map.! (name1 `vs` name2), fixpt Map.! (name2 `vs` name1))
+  let is1 (Vs n1 n2 _) = n1 == name1 && n2 == name2
+  let is2 (Vs n1 n2 _) = n1 == name2 && n2 == name1
+  let Vs _ _ result1 = extractPMEEkey is1 fixpt
+  let Vs _ _ result2 = extractPMEEkey is2 fixpt
+  return (result1, result2)
 
-compete :: Env -> Name -> Name -> IO (Bool, Bool)
+compete :: IsAct a => Env a -> Name -> Name -> IO (a, a)
 compete = either die return .:: tryCompete

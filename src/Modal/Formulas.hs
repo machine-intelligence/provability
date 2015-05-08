@@ -55,12 +55,13 @@ ff = Val False
 tt :: ModalFormula v
 tt = Val True
 
+incon :: Int -> ModalFormula v
+incon 0 = ff
+incon n = Box $ incon (n-1)
+
 holdsk :: Int -> ModalFormula v -> ModalFormula v
 holdsk 0 phi = phi
 holdsk k phi = Neg (incon k) `Imp` phi
-  where
-    incon 0 = ff
-    incon n = Box $ incon (n-1)
 
 -- Operator like function that encodes "provable in S+Con^k(S)", where
 -- "S" is the original system.
@@ -72,15 +73,15 @@ diak k phi = Neg $ Box (holdsk k $ Neg phi)
 
 -- Data structure to be mapped across a formula.
 data ModalEvaluator v a = ModalEvaluator {
-    handleVal :: Bool -> a,
-    handleVar :: v -> a,
-    handleNeg :: a -> a,
-    handleAnd :: a -> a -> a,
-    handleOr  :: a -> a -> a,
-    handleImp :: a -> a -> a,
-    handleIff :: a -> a -> a,
-    handleBox :: a -> a,
-    handleDia :: a -> a}
+  handleVal :: Bool -> a,
+  handleVar :: v -> a,
+  handleNeg :: a -> a,
+  handleAnd :: a -> a -> a,
+  handleOr  :: a -> a -> a,
+  handleImp :: a -> a -> a,
+  handleIff :: a -> a -> a,
+  handleBox :: a -> a,
+  handleDia :: a -> a}
 
 -- And how to use it to map:
 modalEval :: ModalEvaluator v a -> ModalFormula v -> a
@@ -96,7 +97,7 @@ modalEval m = f where
   f (Dia x) = handleDia m (f x)
 
 joinVariable :: (v -> ModalFormula w) -> ModalFormula v -> ModalFormula w
-joinVariable f = modalEval $ ModalEvaluator {
+joinVariable f = modalEval ModalEvaluator{
   handleVal = Val, handleVar = f, handleNeg = Neg,
   handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
   handleBox = Box, handleDia = Dia }
@@ -104,10 +105,10 @@ joinVariable f = modalEval $ ModalEvaluator {
 mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
 mapVariable f = joinVariable (Var . f)
 
-allVars :: Ord v => ModalFormula v -> Set v
+allVars :: ModalFormula v -> [v]
 allVars = modalEval ModalEvaluator {
-  handleVal = const S.empty, handleVar = S.singleton, handleNeg = id,
-  handleAnd = S.union, handleOr = S.union, handleImp = S.union, handleIff = S.union,
+  handleVal = const [], handleVar = pure, handleNeg = id,
+  handleAnd = (++), handleOr = (++), handleImp = (++), handleIff = (++),
   handleBox = id, handleDia = id }
 
 data ShowFormula = ShowFormula {
@@ -144,11 +145,12 @@ showUnicode = showFormula (ShowFormula "⊤" "⊥" "¬" "∧" "∨" "→" "↔" 
 showAscii :: Show v => ModalFormula v -> String
 showAscii = showFormula (ShowFormula "T" "F" "~" "&&" "||" "->" "<->" "[]" "<>")
 
-instance Show v => Show (ModalFormula v) where
-  show = showUnicode
+instance Show v => Show (ModalFormula v) where show = showUnicode
 
 --------------------------------------------------------------------------------
 
+-- Only works if v can be read from a string that starts with a letter or underscore,
+-- and then contains alphaNums, underscores, or equals signs.
 formulaParser :: Read v => Parser (ModalFormula v)
 formulaParser = buildExpressionParser table term <?> "ModalFormula"
   where
@@ -210,7 +212,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
       makeTokenParser emptyDef { commentStart = "{-"
                                , commentEnd = "-}"
                                , identStart = letter <|> char '_'
-                               , identLetter = letter <|> char '_' <|> digit
+                               , identLetter = alphaNum <|> oneOf "_="
                                , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
                                , opLetter = oneOf "->]&|123456789"
                                , reservedOpNames = [ "¬", "∧", "∨", "→", "↔", "□", "◇"

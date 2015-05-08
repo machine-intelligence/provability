@@ -2,12 +2,8 @@ module Modal.GameTools where
 import Modal.Formulas
 import Data.Map hiding (map)
 import qualified Data.Map as Map
+import Modal.Utilities
 import Text.Printf (printf)
-
--- The enum list associated with an enum type.
--- Assumes toEnum 0 is the least element in the enum.
-enumerate :: Enum a => [a]
-enumerate = enumFrom (toEnum 0)
 
 -- Intuitively, a modal program is a series of modal formulas, one for each
 -- action, saying whether or not the program executes that action.

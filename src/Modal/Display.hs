@@ -1,7 +1,14 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Modal.Display where
+import Control.Arrow (first)
 import Data.List (transpose)
 import Data.Map hiding (map, foldr)
 import qualified Data.Map as Map
+import Data.Monoid ((<>), mconcat)
+import Data.Text (Text)
+import qualified Data.Text as Text
+import qualified Data.Text.IO as Text.IO
+import Modal.Utilities
 import Text.Printf (printf)
 
 type Table = [[String]]
@@ -50,3 +57,22 @@ renderTable table = unlines $ map concat (squareUp table)
 
 displayTable :: Table -> IO ()
 displayTable = putStrLn . renderTable
+
+class Blockable a where
+  blockLines :: a -> [(Int, Text)]
+
+increaseIndent :: [(Int, Text)] -> [(Int, Text)]
+increaseIndent = map (first succ)
+
+renderBlock' :: Blockable a => Text -> a -> Text
+renderBlock' indent = Text.unlines . map (uncurry indented) . blockLines where
+  indented n = (mconcat (replicate n indent) <>)
+
+renderBlock :: Blockable a => a -> Text
+renderBlock = renderBlock' "  "
+
+displayBlock' :: Blockable a => Text -> a -> IO ()
+displayBlock' = Text.IO.putStrLn .: renderBlock'
+
+displayBlock :: Blockable a => a -> IO ()
+displayBlock = Text.IO.putStrLn . renderBlock
