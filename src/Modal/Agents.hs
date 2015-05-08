@@ -46,7 +46,7 @@ prg f D = Neg f
 bot :: String -> Program CorD CorD
 bot = prg . read
 
-env :: Env CorD
+env :: Env CorD CorD
 Right env = nobody @<
   -- Rank 0 bots
   ("CB", bot "⊤") @+

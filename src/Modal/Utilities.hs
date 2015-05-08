@@ -1,6 +1,7 @@
 module Modal.Utilities
   ( (.:)
   , (.::)
+  , (.:::)
   , ($>)
   , (<$$>)
   , Name
@@ -14,6 +15,9 @@ import Control.Applicative
 
 (.::) :: (d -> x) -> (a -> b -> c -> d) -> a -> b -> c -> x
 (.::) = (.) . (.) . (.)
+
+(.:::) :: (e -> x) -> (a -> b -> c -> d -> e) -> a -> b -> c -> d -> x
+(.:::) = (.) . (.) . (.) . (.)
 
 infixl 4 $>, <$$>
 
