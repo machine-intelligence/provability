@@ -2,12 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Modal.Agents where
 import Control.Applicative
-import Modal.Code (ModalVar(..), Program)
+import Data.Monoid
+import Modal.Code (Agent, ModalVar(..), Program, agent, ContextError, forceCompile)
 import Modal.Formulas
 import Modal.Environment
 import Modal.Parser
 import qualified Data.Text as Text
-import Text.Parsec (oneOf)
+import Text.Parsec (oneOf, ParseError)
 import Modal.Display
 
 data CorD = C | D deriving (Eq, Ord, Enum, Read, Show)
@@ -38,6 +39,20 @@ masqueBot n = dbLoop $ tbfLoop disjunct where
     cond m = foldl1 And $ map (\k -> Neg (boxk k fbreak) %^ Neg (boxk k fdefect)) [0..m]
     breakOut 0 = Box fbreak
     breakOut m = breakOut (pred m) %| (cond (pred m) %^ boxk m fbreak)
+
+modalUDT :: (Agent CorD CorD)
+Right modalUDT = agent $
+  "def UDT\n" <>
+  "  let $level = 0\n" <>
+  "  for outcome $o in ...\n" <>
+  "    for action $a in ...\n" <>
+  "      if [] $level [Me(Them)=$a -> Them(Me)=$o]\n" <>
+  "        return $a\n" <>
+  "      end\n" <>
+  "      let $level = $level + 1\n" <>
+  "    end\n" <>
+  "  end\n" <>
+  "  return\n"
 
 prg :: ModalFormula AgentVar -> Program CorD CorD
 prg f C = f

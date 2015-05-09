@@ -15,6 +15,7 @@ import Data.Maybe (isJust)
 import Data.Monoid ((<>))
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Text (Text)
 import qualified Data.Text as T
 import Modal.Formulas (ModalFormula, (%^), (%|))
 import qualified Modal.Formulas as L
@@ -65,6 +66,13 @@ compile (Agent n c) = second (L.simplify .) . (n,) <$> codeToFormula c
 
 forceCompile :: (Eq a, Enum a, Enum o) => Agent a o -> (Name, Program a o)
 forceCompile agent = let Right result = compile agent in result
+
+agent :: VeryParsable a o => Text -> Either (Either ParseError ContextError) (Agent a o)
+agent text = case parse parser "agent" text of
+    Left err -> Left (Left err)
+    Right agent -> case compile agent of
+      Left err -> Left (Right err)
+      Right _ -> Right agent
 
 -------------------------------------------------------------------------------
 
@@ -172,7 +180,6 @@ evalRelation extract make (NotIn vs)
 
 data Expr
   = Num (V Int)
-  | Parens Expr
   | Add Expr Expr
   | Sub Expr Expr
   | Mul Expr Expr
@@ -180,23 +187,24 @@ data Expr
   deriving Eq
 instance Show Expr where
   show (Num v) = show v
-  show (Parens x) = "(" ++ show x ++ ")"
   show (Add x y) = show x ++ "+" ++ show y
   show (Sub x y) = show x ++ "-" ++ show y
   show (Mul x y) = show x ++ "*" ++ show y
   show (Exp x y) = show x ++ "^" ++ show y
 instance Parsable Expr where
-  parser =   try (Num <$> parser)
-         <|> try (parens parser)
-         <|> try (Add <$> parser <*> (symbol "+" *> parser))
-         <|> try (Sub <$> parser <*> (symbol "-" *> parser))
-         <|> try (Mul <$> parser <*> (symbol "*" *> parser))
-         <|> try (Exp <$> parser <*> (symbol "^" *> parser))
-         <?> "an expression"
+  parser = buildExpressionParser lTable term where
+    lTable =
+      [ [Infix (try $ symbol "+" $> Add) AssocRight]
+      , [Infix (try $ symbol "-" $> Sub) AssocRight]
+      , [Infix (try $ symbol "*" $> Mul) AssocRight]
+      , [Infix (try $ symbol "^" $> Exp) AssocRight] ]
+    term
+      =   parens parser
+      <|> try (Num <$> (parser :: Parser (V Int)))
+      <?> "a math expression"
 
 evalExpr :: Contextual a o m => Expr -> m Int
 evalExpr (Num v) = getN v
-evalExpr (Parens x) = evalExpr x
 evalExpr (Add x y) = (+) <$> evalExpr x <*> evalExpr y
 evalExpr (Sub x y) = (-) <$> evalExpr x <*> evalExpr y
 evalExpr (Mul x y) = (*) <$> evalExpr x <*> evalExpr y
@@ -218,7 +226,7 @@ instance (Enum x, Parsable x) => Parsable (Range x) where
   parser = try rEnum <|> try rList <|> try rAll <?> "a range" where
     rEnum = REnum <$> (parser <* symbol "..") <*> pEnumTo <*> pEnumBy
     pEnumTo = optional parser
-    pEnumBy = option (Vv 1) (keyword "by" *> parser)
+    pEnumBy = option (Vv 1) (try $ keyword "by" *> parser)
     rList = RList <$> parser
     rAll = symbol "..." $> RAll
 
@@ -323,7 +331,7 @@ instance (
       <|> try (function fPossible)
       <|> try (Var <$> relVar)
       <|> try (Val <$> val)
-      <?> "A simple expression"
+      <?> "a statement"
 
 type ModalizedStatement a o = Statement Void Void a o
 
@@ -350,30 +358,30 @@ evalStatement' evar stm = case stm of
 -------------------------------------------------------------------------------
 
 data CodeFragment a o
-  = ForMe Name (Range a) (CodeFragment a o)
-  | ForThem Name (Range o) (CodeFragment a o)
-  | ForN Name (Range Int) (CodeFragment a o)
+  = ForMe Name (Range a) [CodeFragment a o]
+  | ForThem Name (Range o) [CodeFragment a o]
+  | ForN Name (Range Int) [CodeFragment a o]
   | LetN Name Expr
-  | If (ModalizedStatement a o) (CodeFragment a o)
-  | EarlyReturn (Maybe a)
+  | If (ModalizedStatement a o) [CodeFragment a o]
+  | EarlyReturn (Maybe (V a))
   | Pass
   deriving Eq
 
 instance (Enum a, Show a, Enum o, Show o) => Blockable (CodeFragment a o) where
-  blockLines (ForMe n r c) =
+  blockLines (ForMe n r cs) =
     [(0, T.pack $ printf "for action %s in %s" (T.unpack n) (show r))] <>
-    increaseIndent (blockLines c)
-  blockLines (ForThem n r c) =
+    increaseIndent (concatMap blockLines cs)
+  blockLines (ForThem n r cs) =
     [(0, T.pack $ printf "for outcome %s in %s" (T.unpack n) (show r))] <>
-    increaseIndent (blockLines c)
-  blockLines (ForN n r c) =
+    increaseIndent (concatMap blockLines cs)
+  blockLines (ForN n r cs) =
     [(0, T.pack $ printf "for number %s in %s" (T.unpack n) (show r))] <>
-    increaseIndent (blockLines c)
+    increaseIndent (concatMap blockLines cs)
   blockLines (LetN n x) =
     [(0, T.pack $ printf "let %s = %s" (T.unpack n) (show x))]
-  blockLines (If s x) =
-    [ (0, T.pack $ printf "if %s then" $ show s) ] <>
-    increaseIndent (blockLines x)
+  blockLines (If s xs) =
+    [ (0, T.pack $ printf "if %s" $ show s) ] <>
+    increaseIndent (concatMap blockLines xs)
   blockLines (EarlyReturn Nothing) = [(0, "return")]
   blockLines (EarlyReturn (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
   blockLines (Pass) = [(0, "pass")]
@@ -399,23 +407,24 @@ evalCodeFragment code = case code of
   ForThem n r code -> loop (withO n) code =<< elemsIn getO r
   ForN n r code -> loop (withN n) code =<< elemsIn getN r
   LetN n x -> evalExpr x >>= modify . withN n >> return mPass
-  If s x -> do
+  If s block -> do
     cond <- evalStatement s
-    ProgFrag _then <- evalCodeFragment x
+    thens <- mapM evalCodeFragment block
+    let ProgFrag _then = foldr1 (>->) thens
     return $ ProgFrag $ \cont a ->
       (cond %^ _then cont a) %| (L.Neg cond %^ cont a)
   EarlyReturn x -> ProgFrag . const <$> evalCode (Return x)
   Pass -> return mPass
-  where loop update code xs
+  where loop update block xs
           | null xs = return mPass
-          | otherwise = foldr1 (>->) <$> sequence fragments
-          where fragments = [modify (update x) >> evalCodeFragment code | x <- xs]
+          | otherwise = foldr1 (>->) . concat <$> sequence fragments
+          where fragments = [modify (update x) >> mapM evalCodeFragment block | x <- xs]
 
 -------------------------------------------------------------------------------
 
 data Code a o
   = Fragment (CodeFragment a o) (Code a o)
-  | Return (Maybe a)
+  | Return (Maybe (V a))
   deriving Eq
 
 instance (Enum a, Show a, Enum o, Show o) => Blockable (Code a o) where
@@ -433,8 +442,8 @@ instance (Ord a, Enum a, Parsable a, Ord o, Enum o, Parsable o) => Parsable (Cod
 
 evalCode :: Evalable a o m => Code a o -> m (Program a o)
 evalCode (Fragment f cont) = evalCodeFragment f >>= \(ProgFrag p) -> p <$> evalCode cont
-evalCode (Return Nothing) = evalCode (Return $ Just $ toEnum 0)
-evalCode (Return (Just a)) = return $ \act -> L.Val (act == a)
+evalCode (Return Nothing) = evalCode (Return $ Just $ Vv $ toEnum 0)
+evalCode (Return (Just v)) = (\a b -> L.Val (a == b)) <$> getA v
 
 codeToFormula :: (Eq a, Enum a, Enum o) => Code a o -> Either ContextError (Program a o)
 codeToFormula code = runExcept $ fst <$> runStateT (evalCode code) emptyContext
@@ -577,13 +586,19 @@ fLetN :: Parser (CodeFragment a o)
 fLetN = LetN <$> (keyword "let" *> varname <* symbol "=") <*> parser
 
 fIf :: VeryParsable a o => Parser (CodeFragment a o)
-fIf = If <$> (keyword "if" *> parser) <*> (keyword "then" *> parser)
+fIf = If <$> (keyword "if" *> parser) <*> fBlock
 
 fForMe :: VeryParsable a o => Parser (CodeFragment a o)
-fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*> parser <*> parser
+fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*>
+  (keyword "in" *> parser) <*> fBlock
 
 fForThem :: VeryParsable a o => Parser (CodeFragment a o)
-fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*> parser <*> parser
+fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
+  (keyword "in" *> parser) <*> fBlock
 
 fForN :: VeryParsable a o => Parser (CodeFragment a o)
-fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*> parser <*> parser
+fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
+  (keyword "in" *> parser) <*> fBlock
+
+fBlock :: VeryParsable a o => Parser [CodeFragment a o]
+fBlock = try (keyword "end" $> []) <|> ((:) <$> parser <*> fBlock) <?> "a code block"
