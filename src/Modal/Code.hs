@@ -74,6 +74,8 @@ agent text = case parse parser "agent" text of
       Left err -> Left (Right err)
       Right _ -> Right agent
 
+
+
 -------------------------------------------------------------------------------
 
 data Context a o = C { avars :: Map Name a, ovars :: Map Name o, nvars :: Map Name Int }
@@ -109,16 +111,16 @@ withN :: Name -> Int -> Context a o -> Context a o
 withN n i c = c{nvars=Map.insert n i $ nvars c}
 
 getA :: Contextual a o m => V a -> m a
-getA (Vn n) = maybe (throwError $ UnknownAVar n) return . Map.lookup n . avars =<< get
-getA (Vv a) = return a
+getA (Ref n) = maybe (throwError $ UnknownAVar n) return . Map.lookup n . avars =<< get
+getA (Lit a) = return a
 
 getO :: Contextual a o m => V o -> m o
-getO (Vn n) = maybe (throwError $ UnknownOVar n) return . Map.lookup n . ovars =<< get
-getO (Vv o) = return o
+getO (Ref n) = maybe (throwError $ UnknownOVar n) return . Map.lookup n . ovars =<< get
+getO (Lit o) = return o
 
 getN :: Contextual a o m => V Int -> m Int
-getN (Vn n) = maybe (throwError $ UnknownNVar n) return . Map.lookup n . nvars =<< get
-getN (Vv i) = return i
+getN (Ref n) = maybe (throwError $ UnknownNVar n) return . Map.lookup n . nvars =<< get
+getN (Lit i) = return i
 
 -------------------------------------------------------------------------------
 
@@ -136,13 +138,13 @@ evalVar (ThemVsOtherIs name rel) = evalRelation getO (ThemVsOtherIs name) rel
 
 -------------------------------------------------------------------------------
 
-data V v = Vn Name | Vv v deriving (Eq, Ord, Read)
-instance Show v => Show (V v) where
-  show (Vn name) = '$' : T.unpack name
-  show (Vv v) = show v
-instance Parsable v => Parsable (V v) where
-  parser =   try (Vv <$> parser)
-         <|> try (Vn <$> (char '$' *> name))
+data V a = Ref Name | Lit a deriving (Eq, Ord, Read)
+instance Show a => Show (V a) where
+  show (Ref name) = '$' : T.unpack name
+  show (Lit x) = show x
+instance Parsable a => Parsable (V a) where
+  parser =   try (Lit <$> parser)
+         <|> try (Ref <$> (char '$' *> name))
          <?> "a variable"
 
 -------------------------------------------------------------------------------
@@ -212,36 +214,50 @@ evalExpr (Exp x y) = (^) <$> evalExpr x <*> evalExpr y
 
 -------------------------------------------------------------------------------
 
-data Range x = REnum (V x) (Maybe (V x)) (V Int) | RList [V x] | RAll deriving Eq
-instance (Enum x, Show x) => Show (Range x) where
-  show (REnum sta (Just sto) ste) = case ste of
-    Vv 1 -> printf "%s..%s" (show sta) (show sto)
-    _    -> printf "%s..%s by %s" (show sta) (show sto) (show ste)
-  show (REnum sta Nothing ste) = case ste of
-    Vv 1 -> printf "%s.." (show sta)
-    _    -> printf "%s.. by %s" (show sta) (show ste)
-  show (RList xs) = printf "[%s]" (List.intercalate ", " $ map show xs)
-  show RAll = "..."
-instance (Enum x, Parsable x) => Parsable (Range x) where
+data Range m x
+  = EnumRange (m x) (Maybe (m x)) (Maybe (m Int))
+  | ListRange [m x]
+  | TotalRange
+instance (Eq (m x), Eq (m Int)) => Eq (Range m x) where
+  (EnumRange sta sto ste) == (EnumRange sta' sto' ste') =
+    (sta, sto, ste) == (sta', sto', ste')
+  (ListRange xs) == (ListRange ys) = xs == ys
+  TotalRange == TotalRange = True
+  _ == _ = False
+instance (Show (m x), Show (m Int)) => Show (Range m x) where
+  show (EnumRange sta msto mste) = printf "%s..%s%s" (show sta) x y where
+    x = maybe ("" :: String) show msto
+    y = maybe ("" :: String) (printf " by %s" . show) mste
+  show (ListRange xs) = printf "[%s]" (List.intercalate ", " $ map show xs)
+  show TotalRange = "..."
+instance (Enum x, Parsable (m x), Parsable (m Int)) => Parsable (Range m x) where
   parser = try rEnum <|> try rList <|> try rAll <?> "a range" where
-    rEnum = REnum <$> (parser <* symbol "..") <*> pEnumTo <*> pEnumBy
-    pEnumTo = optional parser
-    pEnumBy = option (Vv 1) (try $ keyword "by" *> parser)
-    rList = RList <$> parser
-    rAll = symbol "..." $> RAll
+    rEnum = EnumRange <$> (parser <* symbol "..") <*> optional parser <*> pEnumBy
+    pEnumBy = optional (try $ keyword "by" *> parser)
+    rList = ListRange <$> parser
+    rAll = symbol "..." $> TotalRange
 
-elemsIn :: (Enum x, Contextual a o m) => (V x -> m x) -> Range x -> m [x]
-elemsIn extract (REnum sta (Just sto) ste) = do
-  start <- extract sta
-  stop <- extract sto
-  step <- getN ste
-  return $ enumFromThenTo start (toEnum $ fromEnum start + step) stop
-elemsIn extract (REnum sta Nothing ste) = do
-  start <- extract sta
-  step <- getN ste
-  return $ enumFromThen start (toEnum $ fromEnum start + step)
-elemsIn extract (RList xs) = mapM extract xs
-elemsIn extract RAll = pure enumerate
+boundedRange :: (Enum x, Parsable (m x), Parsable (m Int)) => Parser (Range m x)
+boundedRange = try rBoundedEnum <|> try rList <?> "a bounded range" where
+  rBoundedEnum = EnumRange <$> (parser <* symbol "..") <*> (Just <$> parser) <*> pEnumBy
+  pEnumBy = optional (try $ keyword "by" *> parser)
+  rList = ListRange <$> parser
+
+elemsIn' :: (Enum x, Applicative m, Monad m) =>
+  (v Int -> m Int) -> (v x -> m x) -> Range v x -> m [x]
+elemsIn' getNum getX rng = case rng of
+  TotalRange -> pure enumerate
+  EnumRange sta Nothing Nothing -> enumFrom <$> getX sta
+  EnumRange sta (Just sto) Nothing -> enumFromTo <$> getX sta <*> getX sto
+  EnumRange sta Nothing (Just ste) ->
+    getX sta >>= \s -> enumFromThen s . toThen s <$> getNum ste
+  EnumRange sta (Just sto) (Just ste) ->
+    getX sta >>= \s -> enumFromThenTo s . toThen s <$> getNum ste <*> getX sto
+  ListRange xs -> mapM getX xs
+  where toThen sta ste = toEnum $ fromEnum sta + ste
+
+elemsInContext :: (Enum x, Contextual a o m) => (V x -> m x) -> Range V x -> m [x]
+elemsInContext = elemsIn' getN
 
 -------------------------------------------------------------------------------
 
@@ -358,9 +374,9 @@ evalStatement' evar stm = case stm of
 -------------------------------------------------------------------------------
 
 data CodeFragment a o
-  = ForMe Name (Range a) [CodeFragment a o]
-  | ForThem Name (Range o) [CodeFragment a o]
-  | ForN Name (Range Int) [CodeFragment a o]
+  = ForMe Name (Range V a) [CodeFragment a o]
+  | ForThem Name (Range V o) [CodeFragment a o]
+  | ForN Name (Range V Int) [CodeFragment a o]
   | LetN Name Expr
   | If (ModalizedStatement a o) [CodeFragment a o]
   | EarlyReturn (Maybe (V a))
@@ -403,9 +419,9 @@ instance (
 
 evalCodeFragment :: Evalable a o m => CodeFragment a o -> m (ProgFrag (ModalVar a o) a)
 evalCodeFragment code = case code of
-  ForMe n r code -> loop (withA n) code =<< elemsIn getA r
-  ForThem n r code -> loop (withO n) code =<< elemsIn getO r
-  ForN n r code -> loop (withN n) code =<< elemsIn getN r
+  ForMe n r code -> loop (withA n) code =<< elemsInContext getA r
+  ForThem n r code -> loop (withO n) code =<< elemsInContext getO r
+  ForN n r code -> loop (withN n) code =<< elemsInContext getN r
   LetN n x -> evalExpr x >>= modify . withN n >> return mPass
   If s block -> do
     cond <- evalStatement s
@@ -442,7 +458,7 @@ instance (Ord a, Enum a, Parsable a, Ord o, Enum o, Parsable o) => Parsable (Cod
 
 evalCode :: Evalable a o m => Code a o -> m (Program a o)
 evalCode (Fragment f cont) = evalCodeFragment f >>= \(ProgFrag p) -> p <$> evalCode cont
-evalCode (Return Nothing) = evalCode (Return $ Just $ Vv $ toEnum 0)
+evalCode (Return Nothing) = evalCode (Return $ Just $ Lit $ toEnum 0)
 evalCode (Return (Just v)) = (\a b -> L.Val (a == b)) <$> getA v
 
 codeToFormula :: (Eq a, Enum a, Enum o) => Code a o -> Either ContextError (Program a o)
@@ -532,12 +548,12 @@ lIff = sym $> Iff where
       <?> "a biconditional"
 
 constant :: Parser (V Int -> Statement a b c d) -> Parser (Statement a b c d)
-constant x = x <*> option (Vv 0) parser
+constant x = x <*> option (Lit 0) parser
 
 function :: VeryParsable c d =>
   Parser (V Int -> Statement c d c d -> Statement a b c d) ->
   Parser (Statement a b c d)
-function x = x <*> option (Vv 0) parser <*> quoted parser
+function x = x <*> option (Lit 0) parser <*> quoted parser
 
 quoted :: Parser a -> Parser a
 quoted x
@@ -598,7 +614,7 @@ fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
 
 fForN :: VeryParsable a o => Parser (CodeFragment a o)
 fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
-  (keyword "in" *> parser) <*> fBlock
+  (keyword "in" *> boundedRange) <*> fBlock
 
 fBlock :: VeryParsable a o => Parser [CodeFragment a o]
 fBlock = try (keyword "end" $> []) <|> ((:) <$> parser <*> fBlock) <?> "a code block"
