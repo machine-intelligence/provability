@@ -76,10 +76,10 @@ instance Parsable a => Parsable (Game a) where
   parser = Game <$> (parser `sepEndBy` w) <* eof
 
 parseAndCompileGame :: SourceName -> Text -> Either CompileError (Game (Name, Program CD CD))
-parseAndCompileGame = parseAndCompile' parser
+parseAndCompileGame = parseAndCompile enumerate enumerate parser
 
 compileGameFile :: FilePath -> IO (Game (Name, Program CD CD))
-compileGameFile = compileFile' parser
+compileGameFile = compileFile enumerate enumerate parser
 
 players :: Game (Name, Program CD CD) -> [(Name, Program CD CD)]
 players g = (rawPlayers g) ++ (foldr (:) [] g) where

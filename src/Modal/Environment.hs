@@ -75,8 +75,13 @@ isModalized = modalEval ModalEvaluator {
   handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
   handleBox = const True, handleDia = const True }
 
-isFullyModalized :: Enum a => Program a v -> Bool
-isFullyModalized program = all (isModalized . program) enumerate
+isFullyModalized :: [a] -> Program a v -> Bool
+isFullyModalized as program = all (isModalized . program) as
+
+subagents :: [a] -> Program a o -> Set Name
+subagents as program = Set.unions [fSubagents $ program a | a <- as] where
+  fSubagents = Set.fromList . extractName . allVars
+  extractName xs = [name | ThemVsOtherIs name _ <- xs]
 
 --------------------------------------------------------------------------------
 -- The environment type. It holds all of the agents on a given side of combat.
@@ -84,20 +89,17 @@ isFullyModalized program = all (isModalized . program) enumerate
 -- type O. That is, these agents can return elements of A and face opponents
 -- who can return elements of O.
 
-newtype Env a o = Env { _participants :: Map Name (Program a o, Int) }
+data Env a o = Env
+  { _participants :: Map Name (Program a o, Int)
+  , _actions :: [a] }
 instance Show (Env a o) where
-	show (Env ps) = printf "{%s}" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
+	show (Env ps _) = printf "{%s}" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
 
-nobody :: Env a o
+nobody :: [a] -> Env a o
 nobody = Env Map.empty
 
-subagents :: Enum a => Program a o -> Set Name
-subagents program = Set.unions [fSubagents $ program a | a <- enumerate] where
-  fSubagents = Set.fromList . extractName . allVars
-  extractName xs = [name | ThemVsOtherIs name _ <- xs]
-
-missingSubagents :: IsAct a => Env a o -> Program a o-> Set Name
-missingSubagents env program = subagents program Set.\\ participants env
+missingSubagents :: Env a o -> Program a o-> Set Name
+missingSubagents env program = subagents (_actions env) program Set.\\ participants env
 
 participants :: Env a o -> Set Name
 participants = Set.fromList . Map.keys . _participants
@@ -106,19 +108,16 @@ participants = Set.fromList . Map.keys . _participants
 rankedParticipants :: Env a o -> Map Name Int
 rankedParticipants = Map.map snd . _participants
 
-rankIn :: IsAct a => Env a o -> Name -> Program a o -> Either EnvError Int
+-- TODO: check ord constraint
+rankIn :: Env a o -> Name -> Program a o -> Either EnvError Int
 rankIn env name program = if null missings then Right rank else Left err where
   err = MissingSubagents name (Set.fromList missings)
   rank = if null ranks then 0 else succ $ maximum ranks
-  (missings, ranks) = partitionEithers $ Set.toList $ Set.map lookupRank $ subagents program
+  (missings, ranks) = partitionEithers $ Set.toList $ Set.map lookupRank subs
+  subs = subagents (_actions env) program
   lookupRank n = maybe (Left n) (Right . snd) $ Map.lookup n (_participants env)
 
 -------------------------------------------------------------------------------
-
--- Helper constraint kind capturing the constraints required on the action type
--- in order to insert an agent into an environment. (The constraint is fairly
--- small now, but may grow.)
-type IsAct a = (Ord a, Enum a)
 
 -- If you want to deal with environments in a safe way, you need to handle
 -- errors of this type.
@@ -138,38 +137,35 @@ instance Show EnvError where
 -- Functions that insert agents into environments.
 
 -- This is the safe way of inserting an agent into an environment.
-insert :: IsAct a => Env a o -> Name -> Program a o -> Either EnvError (Env a o)
+insert :: Ord a => Env a o -> Name -> Program a o -> Either EnvError (Env a o)
 insert env name program = do
-  (unless $ isFullyModalized program) (Left $ IsNotModalized name)
+  (unless $ isFullyModalized (_actions env) program) (Left $ IsNotModalized name)
   (when $ Map.member name $ _participants env) (Left $ NameCollision name)
   rank <- rankIn env name program
-  return $ Env $ Map.insert name (program, rank) (_participants env)
+  return env{_participants=Map.insert name (program, rank) (_participants env)}
 
-insertAll :: IsAct a => Env a o -> [(Name, Program a o)] -> Either EnvError (Env a o)
+insertAll :: Ord a => Env a o -> [(Name, Program a o)] -> Either EnvError (Env a o)
 insertAll env ((n, p):xs) = insert env n p >>= flip insertAll xs
 insertAll env [] = Right env
 
-insertFile :: (Parsable a, IsAct a, Parsable o, IsAct o) => Env a o -> FilePath -> IO (Env a o)
-insertFile env fname = run . insertAll env =<< compileFile fname
-
 -- A safe way to start building an environment.
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
-(@<) :: IsAct a => Env a o -> (Name, Program a o) -> Either EnvError (Env a o)
+(@<) :: (Ord a, Enum a) => Env a o -> (Name, Program a o) -> Either EnvError (Env a o)
 (@<) e = uncurry (insert e)
 
 -- A safe combinator for continuing to build an environment
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
-(@+) :: IsAct a =>
+(@+) :: (Ord a, Enum a) =>
   Either EnvError (Env a o) -> (Name, Program a o) -> Either EnvError (Env a o)
 e @+ nf = e >>= (@< nf)
 
 -- An inline version of insertAll
-(@++) :: IsAct a =>
+(@++) :: (Ord a, Enum a) =>
   Either EnvError (Env a o) -> [(Name, Program a o)] -> Either EnvError (Env a o)
 e @++ nps = e >>= flip insertAll nps
 
 -- The unsafe way of building environments
-(@!) :: IsAct a => Env a o -> (Name, Program a o) -> (Env a o)
+(@!) :: (Ord a, Enum a) => Env a o -> (Name, Program a o) -> (Env a o)
 (@!) e = uncurry (force .: insert e)
 
 --------------------------------------------------------------------------------
@@ -185,27 +181,28 @@ instance Show CompetitionError where
 
 -- Attempts to build a map of modal formulas describing the competition, given
 -- two environments and two names.
-competitionMap2 :: (IsAct a, IsAct o) =>
-  Env a o -> Env o a -> Name -> Name -> Either CompetitionError (Competition a o)
+competitionMap2 :: (Ord a, Ord o) =>
+  Env a o -> Env o a -> Name -> Name ->
+  Either CompetitionError (Competition a o)
 competitionMap2 env1 env2 name1 name2 = do
   let emap1 = _participants env1
   let emap2 = _participants env2
   program1 <- maybe (Left $ UnknownPlayer name1) (Right . fst) (Map.lookup name1 emap1)
   program2 <- maybe (Left $ UnknownPlayer name2) (Right . fst) (Map.lookup name2 emap2)
   let top1 = [(Vs1 name1 name2 a, expandNames Vs1 Vs2 name1 name2 (program1 a))
-                      | a <- enumerate]
+                      | a <- (_actions env1)]
   let top2 = [(Vs2 name2 name1 o, expandNames Vs2 Vs1 name2 name1 (program2 o))
-                      | o <- enumerate]
+                      | o <- (_actions env2)]
   lefts <- sequence [competitionMap2 env1 env2 x name2
-                      | x <- Set.toList $ subagents program1]
+                      | x <- Set.toList $ subagents (_actions env1) program1]
   rights <- sequence [competitionMap2 env1 env2 name1 x
-                      | x <- Set.toList $ subagents program2]
+                      | x <- Set.toList $ subagents (_actions env2) program2]
   return $ Map.unions $ (Map.fromList top1) : (Map.fromList top2) : lefts ++ rights
 
 -- Attempts to figure out how the two named agents behave against each other.
 -- WARNING: This function may error if the modal formulas in the competition
 -- map are not P.M.E.E. (provably mutally exclusive and extensional).
-compete2 :: (IsAct a, IsAct o) =>
+compete2 :: (Ord a, Ord o) =>
   Env a o -> Env o a -> Name -> Name -> Either CompetitionError (a, o)
 compete2 env1 env2 name1 name2 = do
   fixpt <- findGeneralGLFixpoint <$> competitionMap2 env1 env2 name1 name2
@@ -217,9 +214,9 @@ compete2 env1 env2 name1 name2 = do
 -- Simplified versions of the above functions for the scenario where both
 -- agents have the same action type.
 
-competitionMap :: IsAct a =>
+competitionMap :: (Ord a, Enum a) =>
   Env a a -> Name -> Name -> Either CompetitionError (Competition a a)
 competitionMap env = competitionMap2 env env
 
-compete :: IsAct a => Env a a -> Name -> Name -> Either CompetitionError (a, a)
+compete :: (Ord a, Enum a) => Env a a -> Name -> Name -> Either CompetitionError (a, a)
 compete env = compete2 env env

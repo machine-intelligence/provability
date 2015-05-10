@@ -8,9 +8,7 @@ module Modal.Code
   , Agent(..)
   , compile
   , parseAndCompile
-  , parseAndCompile'
   , compileFile
-  , compileFile'
   , Void(..)
   , ContextError(..)
   , ParseError(..)
@@ -86,42 +84,43 @@ type Program a o = ModalProgram (ModalVar a o) a
 type CompileError = Either ParseError ContextError
 
 data Agent a o = Agent { agentName :: Name, sourceCode :: Code a o } deriving Eq
-instance (Enum a, Show a, Enum o, Show o) => Blockable (Agent a o) where
+instance (Show a, Show o) => Blockable (Agent a o) where
   blockLines (Agent n c) =
     (0, T.pack $ printf "def %s" (T.unpack n)) : increaseIndent (blockLines c)
-instance (Enum a, Show a, Enum o, Show o) => Show (Agent a o) where
+instance (Show a, Show o) => Show (Agent a o) where
   show = T.unpack . renderBlock
-instance (Ord a, Enum a, Parsable a, Ord o, Enum o, Parsable o) => Parsable (Agent a o) where
+instance (Ord a, Parsable a, Ord o, Parsable o) => Parsable (Agent a o) where
   parser = Agent <$> (keyword "def" *> name) <*> parser
 
-compile :: (Eq a, Enum a, Enum o) => Agent a o -> Either ContextError (Name, Program a o)
-compile (Agent n c) = second (L.simplify .) . (n,) <$> codeToFormula c
+compile :: (Eq a, Eq o) => [a] -> [o] -> Agent a o -> Either ContextError (Name, Program a o)
+compile as os (Agent n c) = second (L.simplify .) . (n,) <$> codeToFormula as os c
 
-parseAndCompile' :: (Eq a, Enum a, Enum o, Traversable t) =>
-  Parser (t (Agent a o)) -> SourceName -> Text -> Either CompileError (t (Name, Program a o))
-parseAndCompile' p = either pErr (either cErr Right . mapM compile) .: parse p where
+parseAndCompile :: (Eq a, Eq o, Traversable t) =>
+  [a] -> [o] -> Parser (t (Agent a o)) -> SourceName -> Text ->
+  Either CompileError (t (Name, Program a o))
+parseAndCompile as os p = either pErr (either cErr Right . compileAll) .: parse p where
+  compileAll = mapM $ compile as os
   pErr = Left . Left
   cErr = Left . Right
 
-parseAndCompile :: VeryParsable a o =>
-  SourceName -> Text -> Either CompileError (Name, Program a o)
-parseAndCompile = fmap runIdentity .: parseAndCompile' parser
-
-compileFile' :: (Eq a, Enum a, Enum o, Traversable t) =>
-  Parser (t (Agent a o)) -> FilePath -> IO (t (Name, Program a o))
-compileFile' p fname = do
+compileFile :: (Eq a, Eq o, Traversable t) =>
+  [a] -> [o] -> Parser (t (Agent a o)) -> FilePath ->
+  IO (t (Name, Program a o))
+compileFile as os p fname = do
   txt <- readFile fname
   let showErr = either show (printf "Error: %s" . show)
   let handleErr = (>> exitFailure) . hPutStrLn stderr . showErr
-  either handleErr return $ parseAndCompile' p fname txt
-
-compileFile :: VeryParsable a o => FilePath -> IO [(Name, Program a o)]
-compileFile = compileFile' (parser `sepEndBy` w)
+  either handleErr return $ parseAndCompile as os p fname txt
 
 -------------------------------------------------------------------------------
 
-data Context a o = C { avars :: Map Name a, ovars :: Map Name o, nvars :: Map Name Int }
-  deriving (Eq, Show)
+data Context a o = C
+  { avars :: Map Name a
+  , ovars :: Map Name o
+  , nvars :: Map Name Int
+  , alist :: [a]
+  , olist :: [o]
+  } deriving (Eq, Show)
 
 data ContextError
   = UnknownAVar Name
@@ -134,18 +133,10 @@ instance Show ContextError where
   show (UnknownOVar n) = printf "outcome variable %s is undefined" (show n)
   show (UnknownNVar n) = printf "number variable %s is undefined" (show n)
 
-type Contextual a o m = (
-  Applicative m,
-  MonadState (Context a o) m,
-  MonadError ContextError m)
+type Contextual a o m = (Applicative m, MonadState (Context a o) m, MonadError ContextError m)
+type Evalable a o m = (Eq a, Eq o, Contextual a o m)
 
-type Evalable a o m = (
-  Eq a, Enum a, Enum o,
-  Applicative m,
-  MonadState (Context a o) m,
-  MonadError ContextError m)
-
-emptyContext :: Context a o
+emptyContext :: [a] -> [o] -> Context a o
 emptyContext = C Map.empty Map.empty Map.empty
 
 withA :: Name -> a -> Context a o -> Context a o
@@ -168,6 +159,15 @@ getO (Lit o) = return o
 getN :: Contextual a o m => V Int -> m Int
 getN (Ref n) = maybe (throwError $ UnknownNVar n) return . Map.lookup n . nvars =<< get
 getN (Lit i) = return i
+
+getAs :: Contextual a o m => m [a]
+getAs = alist <$> get
+
+getOs :: Contextual a o m => m [o]
+getOs = olist <$> get
+
+defaultAction :: Contextual a o m => m a
+defaultAction = head <$> getAs
 
 -------------------------------------------------------------------------------
 
@@ -277,14 +277,14 @@ instance (Show (m x), Show (m Int)) => Show (Range m x) where
     y = maybe ("" :: String) (printf " by %s" . show) mste
   show (ListRange xs) = printf "[%s]" (List.intercalate ", " $ map show xs)
   show TotalRange = "..."
-instance (Enum x, Parsable (m x), Parsable (m Int)) => Parsable (Range m x) where
+instance (Parsable (m x), Parsable (m Int)) => Parsable (Range m x) where
   parser = try rEnum <|> try rList <|> try rAll <?> "a range" where
     rEnum = EnumRange <$> (parser <* symbol "..") <*> optional parser <*> pEnumBy
     pEnumBy = optional (try $ keyword "by" *> parser)
     rList = ListRange <$> parser
     rAll = symbol "..." $> TotalRange
 
-boundedRange :: (Enum x, Parsable (m x), Parsable (m Int)) => Parser (Range m x)
+boundedRange :: (Parsable (m x), Parsable (m Int)) => Parser (Range m x)
 boundedRange = try rBoundedEnum <|> try rList <?> "a bounded range" where
   rBoundedEnum = EnumRange <$> (parser <* symbol "..") <*> (Just <$> parser) <*> pEnumBy
   pEnumBy = optional (try $ keyword "by" *> parser)
@@ -303,8 +303,16 @@ elemsIn getNum getX rng = case rng of
   ListRange xs -> mapM getX xs
   where toThen sta ste = toEnum $ fromEnum sta + ste
 
-elemsInContext :: (Enum x, Contextual a o m) => (V x -> m x) -> Range V x -> m [x]
-elemsInContext = elemsIn getN
+elemsInContext :: (Eq x, Evalable a o m) => (m [x]) -> (V x -> m x) -> Range V x -> m [x]
+elemsInContext getXs _    TotalRange = getXs
+elemsInContext _     getX (ListRange xs) = mapM getX xs
+elemsInContext getXs getX (EnumRange sta msto mste) = renum msto mste where
+  renum Nothing    Nothing    = dropWhile . (/=) <$> getX sta <*> getXs
+  renum (Just sto) Nothing    = takeWhile . (/=) <$> getX sto <*> renum Nothing Nothing
+  renum _          (Just ste) = every <$> getN ste <*> renum msto Nothing
+  every n xs = case drop (pred n) xs of
+                 (y:ys) -> y : every n ys
+                 [] -> []
 
 -------------------------------------------------------------------------------
 
@@ -378,8 +386,8 @@ instance (Show oa, Show oo, Show a, Show o) => Show (Statement oa oo a o) where
 instance (
   Ord oa, Parsable oa,
   Ord oo, Parsable oo,
-  Ord a, Enum a, Parsable a,
-  Ord o, Enum o, Parsable o ) => Parsable (Statement oa oo a o) where
+  Ord a, Parsable a,
+  Ord o, Parsable o ) => Parsable (Statement oa oo a o) where
   parser = buildExpressionParser lTable term where
     lTable =
       [ [Prefix lNeg]
@@ -430,7 +438,7 @@ data CodeFragment a o
   | Pass
   deriving Eq
 
-instance (Enum a, Show a, Enum o, Show o) => Blockable (CodeFragment a o) where
+instance (Show a, Show o) => Blockable (CodeFragment a o) where
   blockLines (ForMe n r cs) =
     [(0, T.pack $ printf "for action %s in %s" (T.unpack n) (show r))] <>
     increaseIndent (concatMap blockLines cs)
@@ -449,12 +457,10 @@ instance (Enum a, Show a, Enum o, Show o) => Blockable (CodeFragment a o) where
   blockLines (EarlyReturn (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
   blockLines (Pass) = [(0, "pass")]
 
-instance (Enum a, Show a, Enum o, Show o) => Show (CodeFragment a o) where
+instance (Show a, Show o) => Show (CodeFragment a o) where
   show = T.unpack . renderBlock
 
-instance (
-  Ord a, Enum a, Parsable a,
-  Ord o, Enum o, Parsable o ) => Parsable (CodeFragment a o) where
+instance (Ord a, Parsable a, Ord o, Parsable o ) => Parsable (CodeFragment a o) where
   parser =   try fForMe
          <|> try fForThem
          <|> try fForN
@@ -466,9 +472,9 @@ instance (
 
 evalCodeFragment :: Evalable a o m => CodeFragment a o -> m (ProgFrag (ModalVar a o) a)
 evalCodeFragment code = case code of
-  ForMe n r code -> loop (withA n) code =<< elemsInContext getA r
-  ForThem n r code -> loop (withO n) code =<< elemsInContext getO r
-  ForN n r code -> loop (withN n) code =<< elemsInContext getN r
+  ForMe n r code -> loop (withA n) code =<< elemsInContext getAs getA r
+  ForThem n r code -> loop (withO n) code =<< elemsInContext getOs getO r
+  ForN n r code -> loop (withN n) code =<< elemsInContext (return [0..]) getN r
   LetN n x -> evalExpr x >>= modify . withN n >> return mPass
   If s block -> do
     cond <- evalStatement s
@@ -490,30 +496,30 @@ data Code a o
   | Return (Maybe (V a))
   deriving Eq
 
-instance (Enum a, Show a, Enum o, Show o) => Blockable (Code a o) where
+instance (Show a, Show o) => Blockable (Code a o) where
   blockLines (Fragment f c) = blockLines f ++ blockLines c
   blockLines (Return Nothing) = [(0, "return")]
   blockLines (Return (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
 
-instance (Enum a, Show a, Enum o, Show o) => Show (Code a o) where
+instance (Show a, Show o) => Show (Code a o) where
   show = T.unpack . renderBlock
 
-instance (Ord a, Enum a, Parsable a, Ord o, Enum o, Parsable o) => Parsable (Code a o) where
+instance (Ord a, Parsable a, Ord o, Parsable o) => Parsable (Code a o) where
   parser =   try (Fragment <$> parser <*> parser)
          <|> try (Return <$> fReturn)
          <?> "some code"
 
 evalCode :: Evalable a o m => Code a o -> m (Program a o)
 evalCode (Fragment f cont) = evalCodeFragment f >>= \(ProgFrag p) -> p <$> evalCode cont
-evalCode (Return Nothing) = evalCode (Return $ Just $ Lit $ toEnum 0)
+evalCode (Return Nothing) = evalCode . Return . Just . Lit =<< defaultAction
 evalCode (Return (Just v)) = (\a b -> L.Val (a == b)) <$> getA v
 
-codeToFormula :: (Eq a, Enum a, Enum o) => Code a o -> Either ContextError (Program a o)
-codeToFormula code = runExcept $ fst <$> runStateT (evalCode code) emptyContext
+codeToFormula :: (Eq a, Eq o) => [a] -> [o] -> Code a o -> Either ContextError (Program a o)
+codeToFormula as os code = runExcept $ fst <$> runStateT (evalCode code) (emptyContext as os)
 
 -------------------------------------------------------------------------------
 
-type VeryParsable a o = (Ord a, Enum a, Parsable a, Ord o, Enum o, Parsable o)
+type VeryParsable a o = (Ord a, Parsable a, Ord o, Parsable o)
 
 sEquals :: Parser ()
 sEquals = void sym where

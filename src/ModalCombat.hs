@@ -39,5 +39,5 @@ main = do
   name <- getProgName
   opts <- execParser $ options name
   bases <- mapM compileGameFile (optEnvs opts)
-  env <- run (foldlM insertAll nobody $ map players bases)
+  env <- run (foldlM insertAll (nobody enumerate) $ map players bases)
   playFile (optFile opts) env
