@@ -17,11 +17,17 @@ class Parsable a where
 instance Parsable Int where
   parser = read <$> many1 digit
 instance Parsable x => Parsable [x] where
-  parser = brackets $ sepEndBy parser comma
+  parser = listParser parser
 instance (Ord x, Parsable x) => Parsable (Set x) where
-  parser = Set.fromList <$> braces (sepEndBy parser comma)
+  parser = setParser parser
 instance Parsable a => Parsable (Identity a) where
   parser = Identity <$> parser
+
+listParser :: Parser x -> Parser [x]
+listParser p = brackets $ sepEndBy p comma
+
+setParser :: Ord x => Parser x -> Parser (Set x)
+setParser p = Set.fromList <$> braces (sepEndBy p comma)
 
 keyword :: String -> Parser ()
 keyword s = void $ w *> string s <* lookAhead ok <* w where

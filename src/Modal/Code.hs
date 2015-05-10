@@ -14,16 +14,18 @@ module Modal.Code
   , ParseError(..)
   , ModalVar(..)
   , V(..)
+  , vParser
   , Relation(..)
+  , relationParser
   , Expr(..)
   , Range(..)
+  , rangeParser
   , elemsIn
-  , Statement(..)
-  , ModalizedStatement
-  , evalStatement
   , CodeFragment(..)
+  , codeFragmentParser
   , evalCodeFragment
   , Code(..)
+  , codeParser
   , evalCode
   , codeToFormula
   ) where
@@ -190,9 +192,12 @@ instance Show a => Show (V a) where
   show (Ref name) = '$' : T.unpack name
   show (Lit x) = show x
 instance Parsable a => Parsable (V a) where
-  parser =   try (Lit <$> parser)
-         <|> try (Ref <$> (char '$' *> name))
-         <?> "a variable"
+  parser = vParser parser
+
+vParser :: Parser x -> Parser (V x)
+vParser p =   try (Lit <$> p)
+          <|> try (Ref <$> (char '$' *> name))
+          <?> "a variable"
 
 -------------------------------------------------------------------------------
 
@@ -208,11 +213,14 @@ instance Show a => Show (Relation a) where
   show (In v) = "∈{" ++ List.intercalate "," (map show $ Set.toList v) ++ "}"
   show (NotIn v) = "∉{" ++ List.intercalate "," (map show $ Set.toList v) ++ "}"
 instance (Ord a, Parsable a) => Parsable (Relation a) where
-  parser =   try (Equals <$> (sEquals *> parser))
-         <|> try (NotEquals <$> (sNotEquals *> parser))
-         <|> try (In <$> (sIn *> parser))
-         <|> try (NotIn <$> (sNotIn *> parser))
-         <?> "a relation"
+  parser = relationParser parser
+
+relationParser :: Ord x => Parser x -> Parser (Relation x)
+relationParser p =   try (Equals <$> (sEquals *> vParser p))
+                 <|> try (NotEquals <$> (sNotEquals *> vParser p))
+                 <|> try (In <$> (sIn *> setParser (vParser p)))
+                 <|> try (NotIn <$> (sNotIn *> setParser (vParser p)))
+                 <?> "a relation"
 
 evalRelation :: Contextual a o m =>
   (V x -> m x) -> (x -> v) -> Relation x -> m (ModalFormula v)
@@ -278,10 +286,13 @@ instance (Show (m x), Show (m Int)) => Show (Range m x) where
   show (ListRange xs) = printf "[%s]" (List.intercalate ", " $ map show xs)
   show TotalRange = "..."
 instance (Parsable (m x), Parsable (m Int)) => Parsable (Range m x) where
-  parser = try rEnum <|> try rList <|> try rAll <?> "a range" where
-    rEnum = EnumRange <$> (parser <* symbol "..") <*> optional parser <*> pEnumBy
-    pEnumBy = optional (try $ keyword "by" *> parser)
-    rList = ListRange <$> parser
+  parser = rangeParser parser parser
+
+rangeParser :: Parser (m Int) -> Parser (m x) -> Parser (Range m x)
+rangeParser n x = try rEnum <|> try rList <|> try rAll <?> "a range" where
+    rEnum = EnumRange <$> (x <* symbol "..") <*> optional x <*> pEnumBy
+    pEnumBy = optional (try $ keyword "by" *> n)
+    rList = ListRange <$> listParser x
     rAll = symbol "..." $> TotalRange
 
 boundedRange :: (Parsable (m x), Parsable (m Int)) => Parser (Range m x)
@@ -388,7 +399,11 @@ instance (
   Ord oo, Parsable oo,
   Ord a, Parsable a,
   Ord o, Parsable o ) => Parsable (Statement oa oo a o) where
-  parser = buildExpressionParser lTable term where
+  parser = statementParser parser parser parser parser
+
+statementParser :: (Ord oa, Ord oo, Ord a, Ord o) =>
+  Parser oa -> Parser oo -> Parser a -> Parser o -> Parser (Statement oa oo a o)
+statementParser oa oo a o = buildExpressionParser lTable term where
     lTable =
       [ [Prefix lNeg]
       , [Infix lAnd AssocRight]
@@ -396,15 +411,18 @@ instance (
       , [Infix lImp AssocRight]
       , [Infix lIff AssocRight] ]
     term
-      =   parens parser
+      =   parens (statementParser oa oo a o)
       <|> try (constant cCon)
-      <|> try (fProvable <*> quoted parser)
-      <|> try (fPossible <*> quoted parser)
-      <|> try (Var <$> relVar)
+      <|> try (fProvable <*> quoted (statementParser a o a o))
+      <|> try (fPossible <*> quoted (statementParser a o a o))
+      <|> try (Var <$> relVar oa oo)
       <|> try (Val <$> val)
       <?> "a statement"
 
 type ModalizedStatement a o = Statement Void Void a o
+
+mstatementParser :: (Ord a, Ord o) => Parser a -> Parser o -> Parser (ModalizedStatement a o)
+mstatementParser = statementParser parser parser
 
 evalStatement :: Contextual a o m => ModalizedStatement a o -> m (ModalFormula (ModalVar a o))
 evalStatement = evalStatement' (\v -> fail "Where did you even get this element of the Void?")
@@ -461,14 +479,29 @@ instance (Show a, Show o) => Show (CodeFragment a o) where
   show = T.unpack . renderBlock
 
 instance (Ord a, Parsable a, Ord o, Parsable o ) => Parsable (CodeFragment a o) where
-  parser =   try fForMe
-         <|> try fForThem
-         <|> try fForN
-         <|> try fLetN
-         <|> try fIf
-         <|> try (EarlyReturn <$> fReturn)
-         <|> try fPass
-         <?> "a code fragment"
+  parser = codeFragmentParser parser parser
+
+codeFragmentParser :: (Ord a, Ord o) => Parser a -> Parser o -> Parser (CodeFragment a o)
+codeFragmentParser a o = pFrag where
+  pFrag =   try fForMe
+        <|> try fForThem
+        <|> try fForN
+        <|> try fLetN
+        <|> try fIf
+        <|> try (EarlyReturn <$> fReturn (vParser a))
+        <|> try fPass
+        <?> "a code fragment"
+  fLetN = LetN <$> (keyword "let" *> varname <* symbol "=") <*> parser
+  fIf = If <$> (keyword "if" *> mstatementParser a o) <*> fBlock
+  fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*>
+    (keyword "in" *> rangeParser parser (vParser a)) <*> fBlock
+  fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
+    (keyword "in" *> rangeParser parser (vParser o)) <*> fBlock
+  fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
+    (keyword "in" *> boundedRange) <*> fBlock
+  fBlock =   try (keyword "end" $> [])
+         <|> ((:) <$> codeFragmentParser a o <*> fBlock) <?> "a code block"
+  fPass = symbol "pass" $> Pass
 
 evalCodeFragment :: Evalable a o m => CodeFragment a o -> m (ProgFrag (ModalVar a o) a)
 evalCodeFragment code = case code of
@@ -505,9 +538,12 @@ instance (Show a, Show o) => Show (Code a o) where
   show = T.unpack . renderBlock
 
 instance (Ord a, Parsable a, Ord o, Parsable o) => Parsable (Code a o) where
-  parser =   try (Fragment <$> parser <*> parser)
-         <|> try (Return <$> fReturn)
-         <?> "some code"
+  parser = codeParser parser parser
+
+codeParser :: (Ord a, Ord o) => Parser a -> Parser o -> Parser (Code a o)
+codeParser a o =   try (Fragment <$> codeFragmentParser a o <*> codeParser a o)
+               <|> try (Return <$> fReturn (vParser a))
+               <?> "some code"
 
 evalCode :: Evalable a o m => Code a o -> m (Program a o)
 evalCode (Fragment f cont) = evalCodeFragment f >>= \(ProgFrag p) -> p <$> evalCode cont
@@ -624,40 +660,16 @@ fPossible = try inSym <|> choice [try $ afterSym s | s <- syms] <?> "a diamond" 
   afterSym s = Provable <$> (symbol s  *> option (Lit 0) parser)
   syms = ["◇", "Possible", "Dia", "Diamond"]
 
-relVar :: (Ord a, Parsable a, Ord o, Parsable o) => Parser (ModalVar (Relation a) (Relation o))
-relVar = try meVsThem <|> try themVsMe <|> try themVsOther <?> "a modal variable" where
-  meVsThem = string "Me(Them)" *> (MeVsThemIs <$> parser)
-  themVsMe = string "Them(Me)" *> (ThemVsMeIs <$> parser)
-  themVsOther = string "Them(" *> (ThemVsOtherIs <$> name) <*> (char ')' *> parser)
+relVar :: (Ord a, Ord o) => Parser a -> Parser o -> Parser (ModalVar (Relation a) (Relation o))
+relVar a o = try meVsThem <|> try themVsMe <|> try themVsOther <?> "a modal variable" where
+  meVsThem = string "Me(Them)" *> (MeVsThemIs <$> relationParser a)
+  themVsMe = string "Them(Me)" *> (ThemVsMeIs <$> relationParser o)
+  themVsOther = string "Them(" *> (ThemVsOtherIs <$> name) <*> (char ')' *> relationParser o)
 
-fPass :: Parser (CodeFragment a o)
-fPass = symbol "pass" $> Pass
-
-fReturn :: Parsable a => Parser (Maybe a)
-fReturn = try returnThing <|> returnNothing <?> "a return statement" where
-  returnThing = Just <$> (symbol "return" *> parser)
+fReturn :: Parser a -> Parser (Maybe a)
+fReturn p = try returnThing <|> returnNothing <?> "a return statement" where
+  returnThing = Just <$> (symbol "return" *> p)
   returnNothing = symbol "return" $> Nothing
 
 varname :: Parser Name
 varname = char '$' *> name
-
-fLetN :: Parser (CodeFragment a o)
-fLetN = LetN <$> (keyword "let" *> varname <* symbol "=") <*> parser
-
-fIf :: VeryParsable a o => Parser (CodeFragment a o)
-fIf = If <$> (keyword "if" *> parser) <*> fBlock
-
-fForMe :: VeryParsable a o => Parser (CodeFragment a o)
-fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*>
-  (keyword "in" *> parser) <*> fBlock
-
-fForThem :: VeryParsable a o => Parser (CodeFragment a o)
-fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
-  (keyword "in" *> parser) <*> fBlock
-
-fForN :: VeryParsable a o => Parser (CodeFragment a o)
-fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
-  (keyword "in" *> boundedRange) <*> fBlock
-
-fBlock :: VeryParsable a o => Parser [CodeFragment a o]
-fBlock = try (keyword "end" $> []) <|> ((:) <$> parser <*> fBlock) <?> "a code block"

@@ -108,7 +108,6 @@ participants = Set.fromList . Map.keys . _participants
 rankedParticipants :: Env a o -> Map Name Int
 rankedParticipants = Map.map snd . _participants
 
--- TODO: check ord constraint
 rankIn :: Env a o -> Name -> Program a o -> Either EnvError Int
 rankIn env name program = if null missings then Right rank else Left err where
   err = MissingSubagents name (Set.fromList missings)
@@ -137,35 +136,35 @@ instance Show EnvError where
 -- Functions that insert agents into environments.
 
 -- This is the safe way of inserting an agent into an environment.
-insert :: Ord a => Env a o -> Name -> Program a o -> Either EnvError (Env a o)
+insert :: Env a o -> Name -> Program a o -> Either EnvError (Env a o)
 insert env name program = do
   (unless $ isFullyModalized (_actions env) program) (Left $ IsNotModalized name)
   (when $ Map.member name $ _participants env) (Left $ NameCollision name)
   rank <- rankIn env name program
   return env{_participants=Map.insert name (program, rank) (_participants env)}
 
-insertAll :: Ord a => Env a o -> [(Name, Program a o)] -> Either EnvError (Env a o)
+insertAll :: Env a o -> [(Name, Program a o)] -> Either EnvError (Env a o)
 insertAll env ((n, p):xs) = insert env n p >>= flip insertAll xs
 insertAll env [] = Right env
 
 -- A safe way to start building an environment.
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
-(@<) :: (Ord a, Enum a) => Env a o -> (Name, Program a o) -> Either EnvError (Env a o)
+(@<) :: Enum a => Env a o -> (Name, Program a o) -> Either EnvError (Env a o)
 (@<) e = uncurry (insert e)
 
 -- A safe combinator for continuing to build an environment
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
-(@+) :: (Ord a, Enum a) =>
+(@+) :: Enum a =>
   Either EnvError (Env a o) -> (Name, Program a o) -> Either EnvError (Env a o)
 e @+ nf = e >>= (@< nf)
 
 -- An inline version of insertAll
-(@++) :: (Ord a, Enum a) =>
+(@++) :: Enum a =>
   Either EnvError (Env a o) -> [(Name, Program a o)] -> Either EnvError (Env a o)
 e @++ nps = e >>= flip insertAll nps
 
 -- The unsafe way of building environments
-(@!) :: (Ord a, Enum a) => Env a o -> (Name, Program a o) -> (Env a o)
+(@!) :: Enum a => Env a o -> (Name, Program a o) -> (Env a o)
 (@!) e = uncurry (force .: insert e)
 
 --------------------------------------------------------------------------------
