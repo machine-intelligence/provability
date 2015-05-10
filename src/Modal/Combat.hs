@@ -116,6 +116,9 @@ doAction env (Describe n1 n2) = do
 playGame :: Game (Name, Program CD CD) -> Env CD CD -> IO ()
 playGame game base = do
   env <- run (insertAll base $ players game)
+  putStr "Agents loaded: "
+  print env
+  putStrLn ""
   mapM_ (doAction env) (objects game)
 
 playFile :: FilePath -> Env CD CD -> IO ()

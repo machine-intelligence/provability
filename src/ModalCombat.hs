@@ -1,4 +1,5 @@
 module Main where
+import Prelude hiding (foldr)
 import Data.Monoid
 import Data.Foldable
 import Options.Applicative
@@ -37,6 +38,6 @@ options name = info (helper <*> optionParser)
 main = do
   name <- getProgName
   opts <- execParser $ options name
-  bases <- mapM compileFile (optEnvs opts)
-  env <- run (foldlM insertAll nobody bases) :: IO (Env CD CD)
+  bases <- mapM compileGameFile (optEnvs opts)
+  env <- run (foldlM insertAll nobody $ map players bases)
   playFile (optFile opts) env

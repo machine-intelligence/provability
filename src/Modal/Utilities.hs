@@ -13,6 +13,7 @@ module Modal.Utilities
 import Control.Applicative
 import Control.Monad.Except
 import Data.Text (Text)
+import System.Exit
 import Text.Printf (printf)
 
 (.:) :: (c -> x) -> (a -> b -> c) -> a -> b -> x
@@ -38,7 +39,7 @@ enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)
 
 die :: Show a => a -> IO b
-die = printf "Error: %s" . show
+die x = putStrLn ("Error: " ++ show x) >> exitFailure
 
 force :: Show l => Either l r -> r
 force = either (error . printf "Forcing failed: %s" . show) id

@@ -86,7 +86,7 @@ isFullyModalized program = all (isModalized . program) enumerate
 
 newtype Env a o = Env { _participants :: Map Name (Program a o, Int) }
 instance Show (Env a o) where
-	show (Env ps) = printf "(%s)" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
+	show (Env ps) = printf "{%s}" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
 
 nobody :: Env a o
 nobody = Env Map.empty
@@ -179,7 +179,9 @@ e @++ nps = e >>= flip insertAll nps
 -- simpler case.
 
 type Competition a o = Map (VsVar a o) (ModalFormula (VsVar a o))
-data CompetitionError = UnknownPlayer Name deriving (Eq, Ord, Read, Show)
+data CompetitionError = UnknownPlayer Name deriving (Eq, Ord, Read)
+instance Show CompetitionError where
+  show (UnknownPlayer n) = printf "unknown player %s" (Text.unpack n)
 
 -- Attempts to build a map of modal formulas describing the competition, given
 -- two environments and two names.
