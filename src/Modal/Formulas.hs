@@ -7,7 +7,9 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
+import qualified Data.Text as T
 import Modal.Display
+import Modal.Parser hiding (parens, braces, identifier)
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
@@ -149,11 +151,8 @@ instance Show v => Show (ModalFormula v) where show = showUnicode
 
 --------------------------------------------------------------------------------
 
--- Only works if v can be read from a string that starts with a letter or underscore,
--- and then contains alphaNums, underscores, or equals signs.
-formulaParser :: Read v => Parser (ModalFormula v)
-formulaParser = buildExpressionParser table term <?> "ModalFormula"
-  where
+instance Read v => Parsable (ModalFormula v) where
+  parser = buildExpressionParser table term <?> "ModalFormula" where
     table = [ [prefix $ choice [ m_reservedOp "¬" >> return Neg
                                , m_reservedOp "~" >> return Neg
                                , m_reservedOp "□" >> return Box
@@ -191,13 +190,13 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
             , [Infix (m_reservedOp "<->" >> return Iff) AssocRight]
             ]
 
-    term = m_parens formulaParser
-           <|> m_braces formulaParser
+    term = m_parens parser
+           <|> m_braces parser
            <|> (m_reserved "⊤" >> return (Val True))
            <|> (m_reserved "T" >> return (Val True))
            <|> (m_reserved "⊥" >> return (Val False))
            <|> (m_reserved "F" >> return (Val False))
-           <|> fmap (Var . read) m_identifier
+           <|>  fmap (Var . read) m_identifier
 
     -- To work-around Parsec's limitation for prefix operators:
     prefix  p = Prefix  . chainl1 p $ return (.)
@@ -211,8 +210,8 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                 , whiteSpace = _ } =
       makeTokenParser emptyDef { commentStart = "{-"
                                , commentEnd = "-}"
-                               , identStart = letter <|> char '_'
-                               , identLetter = alphaNum <|> oneOf "_="
+                               , identStart = satisfy isNameFirstChar
+                               , identLetter = satisfy isNameChar
                                , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
                                , opLetter = oneOf "->]&|123456789"
                                , reservedOpNames = [ "¬", "∧", "∨", "→", "↔", "□", "◇"
@@ -224,7 +223,7 @@ formulaParser = buildExpressionParser table term <?> "ModalFormula"
                                }
 
 instance Read v => Read (ModalFormula v) where
-  readsPrec _ s = case parse (formulaParser <* eof) "" s of
+  readsPrec _ s = case parse (parser <* eof) "" (T.pack s) of
     Right result -> [(result,"")]
     -- We could just return the remaining string, but Parsec gives
     -- much nicer errors. So we ask it to consume the whole input and
@@ -420,10 +419,13 @@ kripkeFrames formulaMap = M.map (take (2 + fixPointer)) results where
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
   fixPointer = fixpointDepth (1 + maxFormulaDepth) mapList
 
-displayKripkeFrames' :: (Show k, Ord k) => [k] -> Map k (ModalFormula k) -> IO ()
-displayKripkeFrames' ks = displayTable . toTable . kripkeFrames where
+kripkeTable' :: (Show k, Ord k) => [k] -> Map k (ModalFormula k) -> Table
+kripkeTable' ks = toTable . kripkeFrames where
   toTable m = listmapToTable ks $ M.map (map boolify) m
   boolify = show . (Val :: Bool -> ModalFormula ())
 
+kripkeTable :: (Show k, Ord k) => Map k (ModalFormula k) -> Table
+kripkeTable m = kripkeTable' (M.keys m) m
+
 displayKripkeFrames :: (Show k, Ord k) => Map k (ModalFormula k) -> IO ()
-displayKripkeFrames m = displayKripkeFrames' (M.keys m) m
+displayKripkeFrames = displayTable . kripkeTable

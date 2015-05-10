@@ -3,6 +3,7 @@ module Modal.Parser where
 import Control.Applicative
 import Control.Monad (void)
 import Data.Char
+import Data.Functor.Identity
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text as Text
@@ -19,6 +20,8 @@ instance Parsable x => Parsable [x] where
   parser = brackets $ sepEndBy parser comma
 instance (Ord x, Parsable x) => Parsable (Set x) where
   parser = Set.fromList <$> braces (sepEndBy parser comma)
+instance Parsable a => Parsable (Identity a) where
+  parser = Identity <$> parser
 
 keyword :: String -> Parser ()
 keyword s = void $ w *> string s <* lookAhead ok <* w where
@@ -50,6 +53,8 @@ braces :: Parser a -> Parser a
 braces = between (symbol "{") (symbol "}")
 
 name :: Parser Name
-name = identifier (satisfy isFirst) (satisfy isRest) where
-  isFirst = (||) <$> isLetter <*> (`elem` "-_'")
-  isRest = (||) <$> isFirst <*> isNumber
+name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
+
+isNameFirstChar, isNameChar :: Char -> Bool
+isNameFirstChar = (||) <$> isLetter <*> (`elem` "-_'")
+isNameChar = (||) <$> isNameFirstChar <*> isNumber

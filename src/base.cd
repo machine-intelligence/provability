@@ -1,0 +1,35 @@
+raw DB = ⊥
+raw CB = ⊤
+
+def FB
+  if □⌜Them(Me)=C⌝
+    return C
+  end
+  return D
+
+def PB
+  if [1]⌜Them(DB)=D⌝ ∧ □⌜Them(Me)=C⌝
+    return C
+  end
+  return D
+
+def NB
+  if □⌜Them(CB)=C⌝
+    return C
+  end
+  return D
+
+def JB
+  if □⌜Them(FB)=C⌝
+    return C
+  end
+  return D
+
+def TB
+  if □⌜Them(DB)=C⌝
+    return C
+  end
+  return D
+
+play FB vs FB
+describe FB vs PB

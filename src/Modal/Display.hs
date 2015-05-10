@@ -22,24 +22,19 @@ padl x n xs = replicate (n - length xs) x ++ xs
 listmapToTable :: (Show k, Ord k) => [k] -> Map k [String] -> Table
 listmapToTable [] _ = []
 listmapToTable ks m = header : rows where
-  header = "" : "│" : map show ks
+  header = "" : " │" : map (printf " %s" . show) ks
   unpaddedCols = map (m !) ks
   cols = map (padr "" $ maximum $ map length unpaddedCols) unpaddedCols
   rows = zipWith addNum [0 :: Int ..] (transpose cols)
-  addNum n row = show n : "│" : row
+  addNum n row = show n : " │" : (map (printf " %s") row)
 
 mapToTable :: (Ord k, Show k, Show v) => Map k v -> Table
-mapToTable = map (\(k, v) -> [show k, ": ", show v]) . toAscList
-
-displayMap' :: (Ord k, Show k, Show v) => Int -> Map k v -> IO ()
-displayMap' indent m = mapM_ (uncurry showLine) squaredLines where
-	spaces = replicate indent ' '
-	showLine label val = printf "%s%s : %s\n" spaces label (show val)
-	squaredLines = [(padr ' ' maxwidth (show k), v) | (k, v) <- toAscList m]
-	maxwidth = foldWithKey (\k v n -> max (length $ show k) n) 0 m
+mapToTable m = [row k v | (k, v) <- toAscList m] where
+  row k v = [padr ' ' (maxwidth + 2) (printf "%s :  " (show k)), show v]
+  maxwidth = foldWithKey (\k v n -> max (length $ show k) n) 0 m
 
 displayMap :: (Ord k, Show k, Show v) => Map k v -> IO ()
-displayMap = displayMap' 0
+displayMap = displayTable . mapToTable
 
 squareUp' :: String -> String -> Table -> [[String]]
 squareUp' l r rows = map normalizeRow paddedRows where
@@ -50,10 +45,13 @@ squareUp' l r rows = map normalizeRow paddedRows where
   colwidth i = maximum [length $ row !! i | row <- paddedRows]
 
 squareUp :: Table -> [[String]]
-squareUp = squareUp' " " " "
+squareUp = squareUp' "" ""
 
 renderTable :: Table -> String
 renderTable table = unlines $ map concat (squareUp table)
+
+indentTable :: String -> Table -> Table
+indentTable indent = map (indent:)
 
 displayTable :: Table -> IO ()
 displayTable = putStrLn . renderTable

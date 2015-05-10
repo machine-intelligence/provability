@@ -5,10 +5,15 @@ module Modal.Utilities
   , ($>)
   , (<$$>)
   , Name
+  , die
   , enumerate
+  , force
+  , run
   ) where
-import Data.Text (Text)
 import Control.Applicative
+import Control.Monad.Except
+import Data.Text (Text)
+import Text.Printf (printf)
 
 (.:) :: (c -> x) -> (a -> b -> c) -> a -> b -> x
 (.:) = (.) . (.)
@@ -31,3 +36,12 @@ type Name = Text
 
 enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)
+
+die :: Show a => a -> IO b
+die = printf "Error: %s" . show
+
+force :: Show l => Either l r -> r
+force = either (error . printf "Forcing failed: %s" . show) id
+
+run :: Show x => Either x a -> IO a
+run = either die return
