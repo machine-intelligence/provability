@@ -3,7 +3,6 @@ module Modal.Display where
 import Control.Arrow (first)
 import Data.List (transpose)
 import Data.Map hiding (map, foldr)
-import qualified Data.Map as Map
 import Data.Monoid ((<>), mconcat)
 import Data.Text (Text)
 import qualified Data.Text as Text
@@ -26,15 +25,15 @@ listmapToTable ks m = header : rows where
   unpaddedCols = map (m !) ks
   cols = map (padr "" $ maximum $ map length unpaddedCols) unpaddedCols
   rows = zipWith addNum [0 :: Int ..] (transpose cols)
-  addNum n row = show n : " │" : (map (printf " %s") row)
+  addNum n row = show n : " │" : map (printf " %s") row
 
-mapToTable :: (Ord k, Show k, Show v) => Map k v -> Table
-mapToTable m = [row k v | (k, v) <- toAscList m] where
+tuplesToTable :: (Show k, Show v) => [(k, v)] -> Table
+tuplesToTable kvs = [row k v | (k, v) <- kvs] where
   row k v = [padr ' ' (maxwidth + 2) (printf "%s :  " (show k)), show v]
-  maxwidth = foldWithKey (\k v n -> max (length $ show k) n) 0 m
+  maxwidth = foldr (\(k, _) n -> max (length $ show k) n) 0 kvs
 
 displayMap :: (Ord k, Show k, Show v) => Map k v -> IO ()
-displayMap = displayTable . mapToTable
+displayMap = displayTable . tuplesToTable . toAscList
 
 squareUp' :: String -> String -> Table -> [[String]]
 squareUp' l r rows = map normalizeRow paddedRows where

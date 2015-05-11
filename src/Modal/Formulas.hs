@@ -1,19 +1,19 @@
 module Modal.Formulas where
 import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
+import Control.Monad (ap)
 import Data.List
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set (Set)
-import qualified Data.Set as S
+import Data.Text (Text)
 import qualified Data.Text as T
 import Modal.Display
 import Modal.Parser hiding (parens, braces, identifier)
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
-import Text.Parsec.String
+import Text.Parsec.Text
 import Text.Parsec.Token
 
 -- Example usage:
@@ -33,6 +33,18 @@ data ModalFormula v = Val {value :: Bool}
                     | Box {contents :: ModalFormula v}
                     | Dia {contents :: ModalFormula v}
                     deriving (Eq, Ord)
+
+instance Monad ModalFormula where
+  return = Var
+  m >>= f = modalEval ModalEvaluator {
+    handleVal = Val, handleVar = f, handleNeg = Neg,
+    handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
+    handleBox = Box, handleDia = Dia } m
+instance Applicative ModalFormula where
+  pure = return
+  (<*>) = ap
+instance Functor ModalFormula where
+  fmap f m = m >>= (Var . f)
 
 -- Syntactic Conveniences:
 infixr   4 %=
@@ -98,15 +110,6 @@ modalEval m = f where
   f (Box x) = handleBox m (f x)
   f (Dia x) = handleDia m (f x)
 
-joinVariable :: (v -> ModalFormula w) -> ModalFormula v -> ModalFormula w
-joinVariable f = modalEval ModalEvaluator{
-  handleVal = Val, handleVar = f, handleNeg = Neg,
-  handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
-  handleBox = Box, handleDia = Dia }
-
-mapVariable :: (v -> a) -> ModalFormula v -> ModalFormula a
-mapVariable f = joinVariable (Var . f)
-
 allVars :: ModalFormula v -> [v]
 allVars = modalEval ModalEvaluator {
   handleVal = const [], handleVar = pure, handleNeg = id,
@@ -126,7 +129,7 @@ data ShowFormula = ShowFormula {
   } deriving (Eq, Ord, Read, Show)
 
 showFormula :: Show v => ShowFormula -> ModalFormula v -> String
-showFormula sf f = showsFormula 0 f "" where
+showFormula sf = flip (showsFormula (0 :: Int)) "" where
   showsFormula p f = case f of
     Val l -> showString $ if l then topSymbol sf else botSymbol sf
     Var v -> showString $ show v
@@ -151,76 +154,80 @@ instance Show v => Show (ModalFormula v) where show = showUnicode
 
 --------------------------------------------------------------------------------
 
-instance Read v => Parsable (ModalFormula v) where
-  parser = buildExpressionParser table term <?> "ModalFormula" where
-    table = [ [prefix $ choice [ m_reservedOp "¬" >> return Neg
-                               , m_reservedOp "~" >> return Neg
-                               , m_reservedOp "□" >> return Box
-                               , m_reservedOp "[]" >> return Box
-                               , m_reservedOp "[0]" >> return Box
-                               , m_reservedOp "[1]" >> return (boxk 1)
-                               , m_reservedOp "[2]" >> return (boxk 2)
-                               , m_reservedOp "[3]" >> return (boxk 3)
-                               , m_reservedOp "[4]" >> return (boxk 4)
-                               , m_reservedOp "[5]" >> return (boxk 5)
-                               , m_reservedOp "[6]" >> return (boxk 6)
-                               , m_reservedOp "[7]" >> return (boxk 7)
-                               , m_reservedOp "[8]" >> return (boxk 8)
-                               , m_reservedOp "[9]" >> return (boxk 9)
-                               , m_reservedOp "◇" >> return Dia
-                               , m_reservedOp "<>" >> return Dia
-                               , m_reservedOp "<0>" >> return Dia
-                               , m_reservedOp "<1>" >> return (diak 1)
-                               , m_reservedOp "<2>" >> return (diak 2)
-                               , m_reservedOp "<3>" >> return (diak 3)
-                               , m_reservedOp "<4>" >> return (diak 4)
-                               , m_reservedOp "<5>" >> return (diak 5)
-                               , m_reservedOp "<6>" >> return (diak 6)
-                               , m_reservedOp "<7>" >> return (diak 7)
-                               , m_reservedOp "<8>" >> return (diak 8)
-                               , m_reservedOp "<9>" >> return (diak 9)
-                               ] ]
-            , [Infix (m_reservedOp "∧" >> return And) AssocLeft]
-            , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
-            , [Infix (m_reservedOp "∨" >> return  Or) AssocLeft]
-            , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
-            , [Infix (m_reservedOp "→" >> return Imp) AssocRight]
-            , [Infix (m_reservedOp "->" >> return Imp) AssocRight]
-            , [Infix (m_reservedOp "↔" >> return Iff) AssocRight]
-            , [Infix (m_reservedOp "<->" >> return Iff) AssocRight]
-            ]
+instance Read v => Parsable (ModalFormula v) where parser = mformulaParser read
 
-    term = m_parens parser
-           <|> m_braces parser
-           <|> (m_reserved "⊤" >> return (Val True))
-           <|> (m_reserved "T" >> return (Val True))
-           <|> (m_reserved "⊥" >> return (Val False))
-           <|> (m_reserved "F" >> return (Val False))
-           <|>  fmap (Var . read) m_identifier
+mformulaParser :: (String -> v) -> Parsec Text s (ModalFormula v)
+mformulaParser reader = buildExpressionParser table term <?> "ModalFormula" where
+  table = [
+    [ prefix $ choice
+      [ m_reservedOp "¬" >> return Neg
+      , m_reservedOp "~" >> return Neg
+      , m_reservedOp "□" >> return Box
+      , m_reservedOp "[]" >> return Box
+      , m_reservedOp "[0]" >> return Box
+      , m_reservedOp "[1]" >> return (boxk 1)
+      , m_reservedOp "[2]" >> return (boxk 2)
+      , m_reservedOp "[3]" >> return (boxk 3)
+      , m_reservedOp "[4]" >> return (boxk 4)
+      , m_reservedOp "[5]" >> return (boxk 5)
+      , m_reservedOp "[6]" >> return (boxk 6)
+      , m_reservedOp "[7]" >> return (boxk 7)
+      , m_reservedOp "[8]" >> return (boxk 8)
+      , m_reservedOp "[9]" >> return (boxk 9)
+      , m_reservedOp "◇" >> return Dia
+      , m_reservedOp "<>" >> return Dia
+      , m_reservedOp "<0>" >> return Dia
+      , m_reservedOp "<1>" >> return (diak 1)
+      , m_reservedOp "<2>" >> return (diak 2)
+      , m_reservedOp "<3>" >> return (diak 3)
+      , m_reservedOp "<4>" >> return (diak 4)
+      , m_reservedOp "<5>" >> return (diak 5)
+      , m_reservedOp "<6>" >> return (diak 6)
+      , m_reservedOp "<7>" >> return (diak 7)
+      , m_reservedOp "<8>" >> return (diak 8)
+      , m_reservedOp "<9>" >> return (diak 9) ] ]
+    , [Infix (m_reservedOp "∧" >> return And) AssocLeft]
+    , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
+    , [Infix (m_reservedOp "∨" >> return  Or) AssocLeft]
+    , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
+    , [Infix (m_reservedOp "→" >> return Imp) AssocRight]
+    , [Infix (m_reservedOp "->" >> return Imp) AssocRight]
+    , [Infix (m_reservedOp "↔" >> return Iff) AssocRight]
+    , [Infix (m_reservedOp "<->" >> return Iff) AssocRight] ]
 
-    -- To work-around Parsec's limitation for prefix operators:
-    prefix  p = Prefix  . chainl1 p $ return (.)
+  term = m_parens (mformulaParser reader)
+         <|> m_braces (mformulaParser reader)
+         <|> (m_reserved "⊤" >> return (Val True))
+         <|> (m_reserved "T" >> return (Val True))
+         <|> (m_reserved "⊥" >> return (Val False))
+         <|> (m_reserved "F" >> return (Val False))
+         <|>  fmap (Var . reader) m_identifier
 
-    TokenParser { parens = m_parens
-                , braces = m_braces
-                , identifier = m_identifier
-                , reservedOp = m_reservedOp
-                , reserved = m_reserved
-                , semiSep1 = _
-                , whiteSpace = _ } =
-      makeTokenParser emptyDef { commentStart = "{-"
-                               , commentEnd = "-}"
-                               , identStart = satisfy isNameFirstChar
-                               , identLetter = satisfy isNameChar
-                               , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
-                               , opLetter = oneOf "->]&|123456789"
-                               , reservedOpNames = [ "¬", "∧", "∨", "→", "↔", "□", "◇"
-                                                   , "~", "&&", "||", "->", "<->", "[]", "<>"
-                                                   , "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]"
-                                                   , "<1>", "<2>", "<3>", "<4>", "<5>", "<6>", "<7>", "<8>", "<9>" ]
-                               , reservedNames = ["T", "F", "⊤", "⊥"]
-                               , caseSensitive = False
-                               }
+  -- To work-around Parsec's limitation for prefix operators:
+  prefix p = Prefix . chainl1 p $ return (.)
+
+  TokenParser
+    { parens = m_parens
+    , braces = m_braces
+    , identifier = m_identifier
+    , reservedOp = m_reservedOp
+    , reserved = m_reserved
+    , semiSep1 = _
+    , whiteSpace = _ } =
+    makeTokenParser emptyDef
+      { commentStart = "{-"
+      , commentEnd = "-}"
+      , identStart = satisfy isNameFirstChar
+      , identLetter = satisfy isNameChar
+      , opStart = oneOf "~-<[&|¬□◇→↔∨∧"
+      , opLetter = oneOf "->]&|123456789"
+      , reservedOpNames =
+        [ "¬", "∧", "∨", "→", "↔", "□", "◇"
+        , "~", "&&", "||", "->", "<->", "[]", "<>"
+        , "[1]", "[2]", "[3]", "[4]", "[5]", "[6]", "[7]", "[8]", "[9]"
+        , "<1>", "<2>", "<3>", "<4>", "<5>", "<6>", "<7>", "<8>", "<9>" ]
+      , reservedNames = ["T", "F", "⊤", "⊥"]
+      , caseSensitive = False }
 
 instance Read v => Read (ModalFormula v) where
   readsPrec _ s = case parse (parser <* eof) "" (T.pack s) of

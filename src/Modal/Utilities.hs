@@ -11,7 +11,6 @@ module Modal.Utilities
   , run
   ) where
 import Control.Applicative
-import Control.Monad.Except
 import Data.Text (Text)
 import System.Exit
 import Text.Printf (printf)

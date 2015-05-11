@@ -1,17 +1,11 @@
 module Modal.GameTools where
+import Control.Applicative
 import Modal.Formulas
 import Data.Map hiding (map)
 import qualified Data.Map as Map
+import Modal.Programming
 import Modal.Utilities
 import Text.Printf (printf)
-
--- Intuitively, a modal program is a series of modal formulas, one for each
--- action, saying whether or not the program executes that action.
-type ModalProgram v a = a -> ModalFormula v
-
-displayAgent :: (Show a, Show v, Enum a) => ModalProgram v a -> IO ()
-displayAgent agent = mapM_ putStrLn formulaLines where
-  formulaLines = [show a ++ ": " ++ show (agent a) | a <- enumerate]
 
 extractPMEEkey :: (k -> Bool) -> Map k Bool -> k
 extractPMEEkey p = extract . Map.keys . filterWithKey matchKey where
@@ -45,12 +39,12 @@ u1ExtractA :: Map (U1 u a) Bool -> a
 u1ExtractA m = let U1A a = extractPMEEkey u1IsA m in a
 
 gameMap :: (Ord u, Enum u, Ord a, Enum a) =>
-  ModalProgram a u ->
-  ModalProgram (U1 u a) a ->
+  ModalProgram u a ->
+  ModalProgram a (U1 u a) ->
   Map (U1 u a) (ModalFormula (U1 u a))
 gameMap universe agent = Map.fromList $ us ++ as where
-  us = [(U1 u, mapVariable U1A $ universe u) | u <- enumerate]
-  as = [(U1A a, agent a) | a <- enumerate]
+  us = [(U1 u, U1A <$> formulaFor universe u) | u <- enumerate]
+  as = [(U1A a, formulaFor agent a) | a <- enumerate]
 
 resolveGame :: (Ord u, Enum u, Ord a, Enum a) =>
   Map (U1 u a) (ModalFormula (U1 u a)) ->
@@ -59,8 +53,8 @@ resolveGame game = (u1ExtractU fixpt, u1ExtractA fixpt) where
   fixpt = findGeneralGLFixpoint game
 
 playGame :: (Ord u, Enum u, Ord a, Enum a) =>
-  ModalProgram a u ->
-  ModalProgram (U1 u a) a ->
+  ModalProgram u a ->
+  ModalProgram a (U1 u a) ->
   (u, a)
 playGame universe agent = resolveGame $ gameMap universe agent
 
@@ -69,8 +63,8 @@ showGame (u, a) =
   printf "U=%s, A=%s\n" (show u) (show a)
 
 displayGame :: (Ord u, Enum u, Show u, Ord a, Enum a, Show a) =>
-  ModalProgram a u ->
-  ModalProgram (U1 u a) a ->
+  ModalProgram u a ->
+  ModalProgram a (U1 u a) ->
   IO ()
 displayGame universe agent = showGame $ playGame universe agent
 
@@ -104,14 +98,14 @@ u2ExtractA2 :: Map (U2 u a1 a2) Bool -> a2
 u2ExtractA2 m = let U2A2 a = extractPMEEkey u2IsA2 m in a
 
 gameMap2 :: (Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
-  ModalProgram (Either a1 a2) u ->
-  ModalProgram (U1 u a1) a1 ->
-  ModalProgram (U1 u a2) a2 ->
+  ModalProgram u (Either a1 a2) ->
+  ModalProgram a1 (U1 u a1) ->
+  ModalProgram a2 (U1 u a2) ->
   Map (U2 u a1 a2) (ModalFormula (U2 u a1 a2))
 gameMap2 universe agent1 agent2 = Map.fromList $ us ++ a1s ++ a2s where
-  us = [(U2 u, mapVariable promoteToA $ universe u) | u <- enumerate]
-  a1s = [(U2A1 a1, mapVariable promoteTo1 $ agent1 a1) | a1 <- enumerate]
-  a2s = [(U2A2 a2, mapVariable promoteTo2 $ agent2 a2) | a2 <- enumerate]
+  us = [(U2 u, promoteToA <$> formulaFor universe u) | u <- enumerate]
+  a1s = [(U2A1 a1, promoteTo1 <$> formulaFor agent1 a1) | a1 <- enumerate]
+  a2s = [(U2A2 a2, promoteTo2 <$> formulaFor agent2 a2) | a2 <- enumerate]
   promoteToA (Left a) = U2A1 a
   promoteToA (Right a) = U2A2 a
   promoteTo1 (U1A a) = U2A1 a
@@ -128,9 +122,9 @@ resolveGame2 game = (u2ExtractU fp, u2ExtractA1 fp, u2ExtractA2 fp) where
   fp = findGeneralGLFixpoint game
 
 playGame2 :: (Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
-  ModalProgram (Either a1 a2) u ->
-  ModalProgram (U1 u a1) a1 ->
-  ModalProgram (U1 u a2) a2 ->
+  ModalProgram u (Either a1 a2) ->
+  ModalProgram a1 (U1 u a1) ->
+  ModalProgram a2 (U1 u a2) ->
   (u, a1, a2)
 playGame2 u a1 a2 = resolveGame2 $ gameMap2 u a1 a2
 
@@ -142,8 +136,8 @@ displayGame2 ::
   (Ord u, Enum u, Show u,
    Ord a1, Enum a1, Show a1,
    Ord a2, Enum a2, Show a2) =>
-  ModalProgram (Either a1 a2) u ->
-  ModalProgram (U1 u a1) a1 ->
-  ModalProgram (U1 u a2) a2 ->
+  ModalProgram u (Either a1 a2) ->
+  ModalProgram a1 (U1 u a1) ->
+  ModalProgram a2 (U1 u a2) ->
   IO ()
 displayGame2 u a1 a2= showGame2 $ playGame2 u a1 a2

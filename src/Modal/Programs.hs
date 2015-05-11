@@ -5,7 +5,7 @@ import Modal.Programming
 
 generalUDT :: Eq a => [Int] -> [u] -> [a] -> a -> ModalProgram (U1 u a) a
 generalUDT levels uorder aorder dflt = modalProgram dflt mainLoop where
-  mainLoop = mFor' (zip levels uaPairs) (uncurry checkUApair)
+  mainLoop = mFor (zip levels uaPairs) (uncurry checkUApair)
   uaPairs = [(u, a) | u <- uorder, a <- aorder]
   checkUApair n (u, a) = mIf (boxk n (Var (U1A a) %> Var (U1 u))) (mReturn a)
 

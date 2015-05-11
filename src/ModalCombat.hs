@@ -4,7 +4,6 @@ import Data.Monoid
 import Data.Foldable
 import Options.Applicative
 import System.Environment (getProgName)
-import Modal.Code
 import Modal.Combat
 import Modal.Environment
 import Modal.Utilities
@@ -35,6 +34,7 @@ options name = info (helper <*> optionParser)
   <> progDesc programDescription
   <> header (name ++ " - Modal Combat!" ) )
 
+main :: IO ()
 main = do
   name <- getProgName
   opts <- execParser $ options name

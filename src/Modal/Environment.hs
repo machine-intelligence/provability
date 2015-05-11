@@ -10,12 +10,15 @@ module Modal.Environment
   , insertAll
   , (@<)
   , (@+)
+  , (@++)
   , (@!)
   , EnvError(..)
   , VsVar(..)
   , is1
   , is2
   , CompetitionError(..)
+  , competitionMap2
+  , compete2
   , competitionMap
   , compete
   ) where
@@ -24,15 +27,13 @@ import Control.Monad (when, unless)
 import Data.Either (partitionEithers)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Monoid
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import qualified Data.Text as Text
 import Modal.Code
 import Modal.Formulas hiding (left)
-import Modal.GameTools hiding (left)
-import Modal.Parser
+import Modal.Programming
+import Modal.GameTools
 import Modal.Utilities
 import Text.Printf (printf)
 
@@ -60,7 +61,7 @@ is2 _ _ _ = False
 expandNames ::
   (Name -> Name -> a -> v) -> (Name -> Name -> o -> v) ->
   Name -> Name -> ModalFormula (ModalVar a o) -> ModalFormula v
-expandNames v1 v2 me them = mapVariable expandName where
+expandNames v1 v2 me them = fmap expandName where
   expandName (MeVsThemIs val) = v1 me them val
   expandName (ThemVsMeIs val) = v2 them me val
   expandName (ThemVsOtherIs other val) = v2 them other val
@@ -76,12 +77,12 @@ isModalized = modalEval ModalEvaluator {
   handleBox = const True, handleDia = const True }
 
 isFullyModalized :: [a] -> Program a v -> Bool
-isFullyModalized as program = all (isModalized . program) as
+isFullyModalized as (ModalProgram p) = all (isModalized . p) as
 
 subagents :: [a] -> Program a o -> Set Name
-subagents as program = Set.unions [fSubagents $ program a | a <- as] where
+subagents as program = Set.unions [fSubagents $ formulaFor program a | a <- as] where
   fSubagents = Set.fromList . extractName . allVars
-  extractName xs = [name | ThemVsOtherIs name _ <- xs]
+  extractName xs = [n | ThemVsOtherIs n _ <- xs]
 
 --------------------------------------------------------------------------------
 -- The environment type. It holds all of the agents on a given side of combat.
@@ -164,7 +165,7 @@ e @+ nf = e >>= (@< nf)
 e @++ nps = e >>= flip insertAll nps
 
 -- The unsafe way of building environments
-(@!) :: Enum a => Env a o -> (Name, Program a o) -> (Env a o)
+(@!) :: Enum a => Env a o -> (Name, Program a o) -> Env a o
 (@!) e = uncurry (force .: insert e)
 
 --------------------------------------------------------------------------------
@@ -188,15 +189,15 @@ competitionMap2 env1 env2 name1 name2 = do
   let emap2 = _participants env2
   program1 <- maybe (Left $ UnknownPlayer name1) (Right . fst) (Map.lookup name1 emap1)
   program2 <- maybe (Left $ UnknownPlayer name2) (Right . fst) (Map.lookup name2 emap2)
-  let top1 = [(Vs1 name1 name2 a, expandNames Vs1 Vs2 name1 name2 (program1 a))
-                      | a <- (_actions env1)]
-  let top2 = [(Vs2 name2 name1 o, expandNames Vs2 Vs1 name2 name1 (program2 o))
-                      | o <- (_actions env2)]
+  let top1 = [(Vs1 name1 name2 a, expandNames Vs1 Vs2 name1 name2 (formulaFor program1 a))
+                      | a <- _actions env1]
+  let top2 = [(Vs2 name2 name1 o, expandNames Vs2 Vs1 name2 name1 (formulaFor program2 o))
+                      | o <- _actions env2]
   lefts <- sequence [competitionMap2 env1 env2 x name2
                       | x <- Set.toList $ subagents (_actions env1) program1]
   rights <- sequence [competitionMap2 env1 env2 name1 x
                       | x <- Set.toList $ subagents (_actions env2) program2]
-  return $ Map.unions $ (Map.fromList top1) : (Map.fromList top2) : lefts ++ rights
+  return $ Map.unions $ Map.fromList top1 : Map.fromList top2 : lefts ++ rights
 
 -- Attempts to figure out how the two named agents behave against each other.
 -- WARNING: This function may error if the modal formulas in the competition
