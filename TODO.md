@@ -1,3 +1,5 @@
+Something is broken in Games.hs! (Compare this branch to master.)
+
 Eventually, I'd like to be able to write and run files like the following:
 
     agent UDT(number start=0, number step=0)
