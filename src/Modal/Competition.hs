@@ -5,8 +5,8 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
-import Modal.Code
 import Modal.Formulas hiding (left)
+import Modal.Code (ModalizableVar(..))
 import Modal.Programming
 import Modal.Environment
 import Modal.Utilities
@@ -40,14 +40,6 @@ is2 :: Name -> Name -> VsVar a o -> Bool
 is2 n m (Vs2 x y _) = x == n && y == m
 is2 _ _ _ = False
 
-expandNames ::
-  (Name -> Name -> a -> v) -> (Name -> Name -> o -> v) ->
-  Name -> Name -> ModalFormula (ModalVar a o) -> ModalFormula v
-expandNames v1 v2 me them = fmap expandName where
-  expandName (MeVsThemIs val) = v1 me them val
-  expandName (ThemVsMeIs val) = v2 them me val
-  expandName (ThemVsOtherIs other val) = v2 them other val
-
 --------------------------------------------------------------------------------
 -- Competitions, by default, allow agents with different action types to play
 -- against each other. This introduces a bit of extra complexity to the types;
@@ -61,8 +53,8 @@ instance Show CompetitionError where
 
 -- Attempts to build a map of modal formulas describing the competition, given
 -- two environments and two names.
-competitionMap2 :: (Ord a, Ord o) =>
-  Env a o -> Env o a -> Name -> Name ->
+competitionMap2 :: (Ord a, Ord o, ModalizableVar v) =>
+  Env v a o -> Env v o a -> Name -> Name ->
   Either CompetitionError (Competition a o)
 competitionMap2 env1 env2 name1 name2 = do
   let emap1 = participants env1
@@ -82,8 +74,8 @@ competitionMap2 env1 env2 name1 name2 = do
 -- Attempts to figure out how the two named agents behave against each other.
 -- WARNING: This function may error if the modal formulas in the competition
 -- map are not P.M.E.E. (provably mutally exclusive and extensional).
-compete2 :: (Ord a, Ord o) =>
-  Env a o -> Env o a -> Name -> Name -> Either CompetitionError (a, o)
+compete2 :: (Ord a, Ord o, ModalizableVar v) =>
+  Env v a o -> Env v o a -> Name -> Name -> Either CompetitionError (a, o)
 compete2 env1 env2 name1 name2 = do
   fixpt <- findGeneralGLFixpoint <$> competitionMap2 env1 env2 name1 name2
   let Vs1 _ _ result1 = extractPMEEkey (is1 name1 name2) fixpt
@@ -94,11 +86,12 @@ compete2 env1 env2 name1 name2 = do
 -- Simplified versions of the above functions for the scenario where both
 -- agents have the same action type.
 
-competitionMap :: (Ord a, Enum a) =>
-  Env a a -> Name -> Name -> Either CompetitionError (Competition a a)
+competitionMap :: (Ord a, Enum a, ModalizableVar v) =>
+  Env v a a -> Name -> Name -> Either CompetitionError (Competition a a)
 competitionMap env = competitionMap2 env env
 
-compete :: (Ord a, Enum a) => Env a a -> Name -> Name -> Either CompetitionError (a, a)
+compete :: (Ord a, Enum a, ModalizableVar v) =>
+  Env v a a -> Name -> Name -> Either CompetitionError (a, a)
 compete env = compete2 env env
 
 

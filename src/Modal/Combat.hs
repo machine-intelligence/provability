@@ -4,7 +4,6 @@ import Prelude hiding (mapM, mapM_, foldr)
 import Control.Applicative
 import Control.Monad (void)
 import Data.Monoid
-import Modal.Agent
 import Modal.Code
 import Modal.Display
 import Modal.Formulas
@@ -23,6 +22,8 @@ import Text.Printf (printf)
 
 data CD = C | D deriving (Eq, Ord, Enum, Read, Show)
 instance Parsable CD where parser = read . return <$> oneOf "CD"
+
+type ModalAgent = ModalizedAgent ModalVar CD CD
 
 data RawVar = MeVsThem | ThemVsMe | ThemVs Name deriving (Eq, Ord, Show)
 instance Read RawVar where
@@ -73,7 +74,7 @@ instance Traversable Game where
   traverse f (Game (Describe n1 n2 : xs))
     = (Game . (Describe n1 n2 :) . objects) <$> traverse f (Game xs)
 
-gameObjectParser :: Parser (GameObject (ModalizedAgent CD CD))
+gameObjectParser :: Parser (GameObject ModalAgent)
 gameObjectParser = try pY <|> try pR <|> try pP <|> try pD <?> "a game object" where
   pY = Player <$> agentParser
   pR = Raw <$> (keyword "raw" *> name <* w1) <*> parser
@@ -81,17 +82,17 @@ gameObjectParser = try pY <|> try pR <|> try pP <|> try pD <?> "a game object" w
   pD = Describe <$> (keyword "describe" *> name <* w1) <*> name
   agentParser = modalizedAgentParser parser parser "mine" "theirs" "def"
 
-gameParser :: Parser (Game (ModalizedAgent CD CD))
+gameParser :: Parser (Game ModalAgent)
 gameParser = Game <$> (gameObjectParser `sepEndBy` w) <* eof
 
-players :: Game (Name, Program CD CD) -> [(Name, Program CD CD)]
+players :: Game (Name, Program ModalVar CD CD) -> [(Name, Program ModalVar CD CD)]
 players g = rawPlayers g ++ foldr (:) [] g where
   rawPlayers (Game []) = []
   rawPlayers (Game (Raw n f : xs)) = (n, ModalProgram $ f2p f) : rawPlayers (Game xs)
   rawPlayers (Game (_ : xs)) = rawPlayers (Game xs)
   f2p f a = let f' = rawToMV <$> f in if a == C then f' else Neg f'
 
-doAction :: Env CD CD -> GameObject (Name, Program CD CD) -> IO ()
+doAction :: Env ModalVar CD CD -> GameObject (Name, Program ModalVar CD CD) -> IO ()
 doAction env (Play n1 n2) = do
   void $ printf "%s vs %s:\n" (T.unpack n1) (T.unpack n2)
   (r1, r2) <- run (compete env n1 n2)
@@ -114,7 +115,7 @@ doAction env (Describe n1 n2) = do
   printf "  Result: %s=%s, %s=%s\n\n" (T.unpack n1) (show r1) (T.unpack n2) (show r2)
 doAction _ _ = return ()
 
-playGame :: Game (Name, Program CD CD) -> Env CD CD -> IO ()
+playGame :: Game (Name, Program ModalVar CD CD) -> Env ModalVar CD CD -> IO ()
 playGame game base = do
   env <- run (insertAll base $ players game)
   putStr "Agents loaded: "
@@ -122,10 +123,10 @@ playGame game base = do
   putStrLn ""
   mapM_ (doAction env) (objects game)
 
-compileFile :: FilePath -> IO (Game (Name, Program CD CD))
+compileFile :: FilePath -> IO (Game (Name, Program ModalVar CD CD))
 compileFile path = do
   game <- runFile (parse gameParser path) path
   run $ mapM (compileModalizedAgent defaultContext) game
 
-playFile :: FilePath -> Env CD CD -> IO ()
+playFile :: FilePath -> Env ModalVar CD CD -> IO ()
 playFile path env = compileFile path >>= flip playGame env where
