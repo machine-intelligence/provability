@@ -29,11 +29,11 @@ listmapToTable ks m = header : rows where
 
 tuplesToTable :: (Show k, Show v) => [(k, v)] -> Table
 tuplesToTable kvs = [row k v | (k, v) <- kvs] where
-  row k v = [padr ' ' (maxwidth + 2) (printf "%s :  " (show k)), show v]
+  row k v = [padr ' ' maxwidth (show k), " :  ", show v]
   maxwidth = foldr (\(k, _) n -> max (length $ show k) n) 0 kvs
 
 displayMap :: (Ord k, Show k, Show v) => Map k v -> IO ()
-displayMap = displayTable . tuplesToTable . toAscList
+displayMap = putStrLn . unlines . map concat . tuplesToTable . toAscList
 
 squareUp' :: String -> String -> Table -> [[String]]
 squareUp' l r rows = map normalizeRow paddedRows where

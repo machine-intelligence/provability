@@ -72,4 +72,4 @@ mIf cond t = mIfElse cond t id
 -- Partial program that iterates over the list of cs.
 mFor :: [c] -> (c -> PartialProgram a v) -> PartialProgram a v
 mFor []     _ = id
-mFor (c:cs) f = f c >>> mFor cs f
+mFor (c:cs) f = f c <<< mFor cs f
