@@ -5,13 +5,18 @@ module Modal.Utilities
   , ($>)
   , (<$$>)
   , Name
+  , Void
   , die
   , enumerate
   , force
   , run
+  , runFile
   ) where
+import Prelude hiding (readFile)
 import Control.Applicative
 import Data.Text (Text)
+import Data.Text.IO (readFile)
+import System.IO (stderr, hPutStrLn)
 import System.Exit
 import Text.Printf (printf)
 
@@ -34,14 +39,23 @@ x $> y = x *> pure y
 
 type Name = Text
 
+data Void
+instance Eq Void
+instance Ord Void
+instance Read Void
+instance Show Void
+
 enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)
 
 die :: Show a => a -> IO b
-die x = putStrLn ("Error: " ++ show x) >> exitFailure
+die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure
 
 force :: Show l => Either l r -> r
 force = either (error . printf "Forcing failed: %s" . show) id
 
 run :: Show x => Either x a -> IO a
 run = either die return
+
+runFile :: Show x => (Text -> Either x a) -> FilePath -> IO a
+runFile f path = run . f =<< readFile path

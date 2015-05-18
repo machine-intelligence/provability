@@ -13,7 +13,6 @@ import Modal.Parser hiding (parens, braces, identifier)
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Language
-import Text.Parsec.Text
 import Text.Parsec.Token
 
 -- Example usage:

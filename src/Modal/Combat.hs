@@ -4,19 +4,21 @@ import Prelude hiding (mapM, mapM_, foldr)
 import Control.Applicative
 import Control.Monad (void)
 import Data.Monoid
+import Modal.Agent
 import Modal.Code
 import Modal.Display
 import Modal.Formulas
 import Modal.Environment
+import Modal.Competition (compete, competitionMap, VsVar(..))
 import Modal.Parser
 import Modal.Programming
 import Modal.Utilities
 import Data.Foldable
 import qualified Data.Map as M
-import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Traversable
 import Text.Parsec hiding ((<|>), optional, many, State)
+import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
 
 data CD = C | D deriving (Eq, Ord, Enum, Read, Show)
@@ -48,22 +50,18 @@ data GameObject a
 
 instance Show a => Show (GameObject a) where
   show (Player a) = show a
-  show (Raw n f) = printf "raw %s = %s" (T.unpack n) (show f)
-  show (Play n1 n2) = printf "play %s vs %s" (T.unpack n1) (T.unpack n2)
-  show (Describe n1 n2) = printf "describe %s vs %s" (T.unpack n1) (T.unpack n2)
+  show (Raw n f) = printf "raw %s %s" (T.unpack n) (show f)
+  show (Play n1 n2) = printf "play %s %s" (T.unpack n1) (T.unpack n2)
+  show (Describe n1 n2) = printf "describe %s %s" (T.unpack n1) (T.unpack n2)
 
-instance Parsable a => Parsable (GameObject a) where
-  parser = try pPlayer <|> try pRaw <|> try pPlay <|> try pDescribe <?> "a game object" where
-    pPlayer = Player <$> parser
-    pRaw = Raw <$> (keyword "raw" *> name) <*> (symbol "=" *> parser)
-    pPlay = Play <$> (keyword "play" *> name) <*> (keyword "vs" *> name)
-    pDescribe = Describe <$> (keyword "describe" *> name) <*> (keyword "vs" *> name)
 
 newtype Game a = Game { objects :: [GameObject a] } deriving (Eq, Show, Functor)
+
 instance Foldable Game where
   foldMap _ (Game []) = mempty
   foldMap f (Game (Player x : xs)) = f x <> foldMap f (Game xs)
   foldMap f (Game (_ : xs)) = foldMap f (Game xs)
+
 instance Traversable Game where
   traverse _ (Game []) = pure $ Game []
   traverse f (Game (Player x : xs)) = rejoin <$> f x <*> traverse f (Game xs) where
@@ -74,8 +72,17 @@ instance Traversable Game where
     = (Game . (Play n1 n2 :) . objects) <$> traverse f (Game xs)
   traverse f (Game (Describe n1 n2 : xs))
     = (Game . (Describe n1 n2 :) . objects) <$> traverse f (Game xs)
-instance Parsable a => Parsable (Game a) where
-  parser = Game <$> (parser `sepEndBy` w) <* eof
+
+gameObjectParser :: Parser (GameObject (ModalizedAgent CD CD))
+gameObjectParser = try pY <|> try pR <|> try pP <|> try pD <?> "a game object" where
+  pY = Player <$> agentParser
+  pR = Raw <$> (keyword "raw" *> name <* w1) <*> parser
+  pP = Play <$> (keyword "play" *> name <* w1) <*> name
+  pD = Describe <$> (keyword "describe" *> name <* w1) <*> name
+  agentParser = modalizedAgentParser parser parser "mine" "theirs" "def"
+
+gameParser :: Parser (Game (ModalizedAgent CD CD))
+gameParser = Game <$> (gameObjectParser `sepEndBy` w) <* eof
 
 players :: Game (Name, Program CD CD) -> [(Name, Program CD CD)]
 players g = rawPlayers g ++ foldr (:) [] g where
@@ -115,5 +122,10 @@ playGame game base = do
   putStrLn ""
   mapM_ (doAction env) (objects game)
 
+compileFile :: FilePath -> IO (Game (Name, Program CD CD))
+compileFile path = do
+  game <- runFile (parse gameParser path) path
+  run $ mapM (compileModalizedAgent defaultContext) game
+
 playFile :: FilePath -> Env CD CD -> IO ()
-playFile fp env = compileFile fp >>= flip playGame env
+playFile path env = compileFile path >>= flip playGame env where

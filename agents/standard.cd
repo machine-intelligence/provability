@@ -1,5 +1,5 @@
-raw DB = ⊥
-raw CB = ⊤
+raw DB ⊥
+raw CB ⊤
 
 def FB
   if □⌜Them(Me)=C⌝
@@ -31,5 +31,5 @@ def TB
   end
   return D
 
-play FB vs FB
-describe FB vs PB
+play FB FB
+describe FB PB

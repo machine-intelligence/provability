@@ -10,7 +10,6 @@ import qualified Data.Text as Text
 import Data.Text (Text)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many)
-import Text.Parsec.Text (Parser)
 
 class Parsable a where
   parser :: Parsec Text s a
@@ -23,6 +22,8 @@ instance (Ord x, Parsable x) => Parsable (Set x) where
   parser = setParser parser
 instance Parsable a => Parsable (Identity a) where
   parser = Identity <$> parser
+instance Parsable Void where
+  parser = fail "Cannot instantiate the Void."
 
 listParser :: Parsec Text s x -> Parsec Text s [x]
 listParser p = brackets $ sepEndBy p comma

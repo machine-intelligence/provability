@@ -3,16 +3,10 @@ import Control.Applicative
 import Modal.Formulas
 import Data.Map hiding (map)
 import qualified Data.Map as Map
+import Modal.Competition
 import Modal.Programming
 import Modal.Utilities
 import Text.Printf (printf)
-
-extractPMEEkey :: (k -> Bool) -> Map k Bool -> k
-extractPMEEkey p = extract . Map.keys . filterWithKey matchKey where
-  matchKey k v = p k && v
-  extract [ ] = error "No true formula! Map was not P.M.E.E."
-  extract [x] = x
-  extract  _  = error "Multiple true formulas! Map was not P.M.E.E."
 
 data U1 u a = U1 u | U1A a | Q1 String deriving (Eq, Ord, Read)
 instance (Show a, Show u) => Show (U1 u a) where

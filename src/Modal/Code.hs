@@ -4,38 +4,47 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Modal.Code
   ( Program
-  , CompileError
-  , Agent(..)
-  , agentParser
-  , compile
-  , parseAndCompile
-  , parseAndCompile'
-  , compileFile
-  , compileFile'
-  , Void
+  , Val(..)
+  , Context(..)
+  , emptyContext
+  , defaultContext
   , ContextError(..)
-  , ParseError
   , ModalVar(..)
-  , V(..)
-  , vParser
+  , Var(..)
+  , varParser
   , Relation(..)
   , relationParser
   , Expr(..)
   , Range(..)
   , rangeParser
   , elemsIn
-  , CodeFragment(..)
-  , codeFragmentParser
-  , evalCodeFragment
-  , Code(..)
-  , codeParser
+  , FreeStatement
+  , freeStatementParser
+  , evalFreeStatement
+  , ModalizedStatement
+  , modalizedStatementParser
+  , evalModalizedStatement
+  , OuterToInner
+  , o2iImpossible
+  , o2iTrivial
+  , Code
   , evalCode
+  , codeParser
   , codeToProgram
+  , ModalizedCode
+  , evalModalizedCode
+  , modalizedCodeParser
+  , modalizedCodeToProgram
+  , FreeCode
+  , evalFreeCode
+  , freeCodeParser
+  , freeCodeToProgram
   ) where
 import Prelude hiding (readFile, sequence, mapM)
 import Control.Applicative
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence)
+import Control.Monad.Identity hiding (mapM, sequence)
 import Data.Map (Map)
 import Data.Traversable (Traversable, sequence, mapM)
 import qualified Data.Map as Map
@@ -45,160 +54,108 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.IO (readFile)
 import Modal.Formulas (ModalFormula, (%^), (%|))
 import qualified Modal.Formulas as L
 import Modal.Display
 import Modal.Parser
 import Modal.Programming
 import Modal.Utilities
-import System.Exit (exitFailure)
-import System.IO (stderr, hPutStrLn)
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Expr
 import Text.Printf (printf)
 
--- GOAL:
---
--- def UDT(U):
---   let $level = 0
---   for $o in theirActions
---     for $a in myActions
---        if □⌜UDT(U)=$a → U(UDT)=$o⌝
---          return $a
---        let $level = $level + 1
-
--------------------------------------------------------------------------------
-
-data Void
-instance Eq Void
-instance Ord Void
-instance Read Void
-instance Show Void
-instance Parsable Void where parser = fail "Cannot instantiate the Void."
-
--------------------------------------------------------------------------------
-
 type Program a o = ModalProgram a (ModalVar a o)
-type CompileError = Either ParseError ContextError
-
-data Agent a o = Agent { agentName :: Name, sourceCode :: Code a o } deriving Eq
-instance (Show a, Show o) => Blockable (Agent a o) where
-  blockLines (Agent n c) =
-    (0, T.pack $ printf "def %s" (T.unpack n)) : increaseIndent (blockLines c)
-instance (Show a, Show o) => Show (Agent a o) where
-  show = T.unpack . renderBlock
-instance (Ord a, Parsable a, Ord o, Parsable o) => Parsable (Agent a o) where
-  parser = agentParser parser parser
-
-agentParser :: (Ord a, Ord o) => Parsec Text s a -> Parsec Text s o -> Parsec Text s (Agent a o)
-agentParser a o = Agent <$> (keyword "def" *> name) <*> codeParser a o
-
-compile :: (Eq a, Eq o) => [a] -> [o] -> Agent a o -> Either ContextError (Name, Program a o)
-compile as os (Agent n c) = (n,) . affectFormula L.simplify <$> codeToProgram as os c
-
-parseAndCompile' :: (Eq a, Eq o, Traversable t) =>
-  (s -> Maybe [a]) -> (s -> Maybe [o]) -> s ->
-  Parsec Text s (t (Agent a o)) -> SourceName -> Text ->
-  Either CompileError (t (Name, Program a o))
-parseAndCompile' gas gos s p n t =
-  case runParser getGameAndState s n t of
-    Left perr -> Left (Left perr)
-    Right (game, finalstate) ->
-      case (gas finalstate, gos finalstate) of
-        (Nothing, Nothing) -> Left $ Right NoActionsOrOutcomes
-        (Nothing, _) -> Left $ Right NoActions
-        (_, Nothing) -> Left $ Right NoOutcomes
-        (Just as, Just os) ->
-          case mapM (compile as os) game of
-            Left cerr -> Left (Right cerr)
-            Right result -> Right result
-  where getGameAndState = (,) <$> p <*> getState
-
-parseAndCompile :: (Eq a, Enum a, Eq o, Enum o, Traversable t, Parsable (t (Agent a o))) =>
-  SourceName -> Text -> Either CompileError (t (Name, Program a o))
-parseAndCompile = parseAndCompile' (const $ Just enumerate) (const $ Just enumerate) () parser
-
-compileFile' :: (Eq a, Eq o, Traversable t) =>
-  (s -> Maybe [a]) -> (s -> Maybe [o]) -> s ->
-  Parsec Text s (t (Agent a o)) -> FilePath ->
-  IO (t (Name, Program a o))
-compileFile' as os s p fname = do
-  txt <- readFile fname
-  let showErr = either show (printf "Error: %s" . show)
-  let handleErr = (>> exitFailure) . hPutStrLn stderr . showErr
-  either handleErr return $ parseAndCompile' as os s p fname txt
-
-compileFile :: (Eq a, Enum a, Eq o, Enum o, Traversable t, Parsable (t (Agent a o))) =>
-  FilePath -> IO (t (Name, Program a o))
-compileFile = compileFile' (const $ Just enumerate) (const $ Just enumerate) () parser
 
 -------------------------------------------------------------------------------
 
-data Context a o = C
-  { avars :: Map Name a
-  , ovars :: Map Name o
-  , nvars :: Map Name Int
-  , alist :: [a]
-  , olist :: [o]
+data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
+
+data Context a o = Context
+  { variables :: Map Name (Val a o)
+  , actionList :: [a]
+  , outcomeList :: [o]
   } deriving (Eq, Show)
 
 data ContextError
-  = UnknownAVar Name
-  | UnknownOVar Name
-  | UnknownNVar Name
-  | NoActionsOrOutcomes
-  | NoActions
-  | NoOutcomes
+  = UnknownVar Name String
+  | WrongType Name String String
   deriving (Eq, Ord)
 
 instance Show ContextError where
-  show (UnknownAVar n) = printf "action variable %s is undefined" (show n)
-  show (UnknownOVar n) = printf "outcome variable %s is undefined" (show n)
-  show (UnknownNVar n) = printf "number variable %s is undefined" (show n)
-  show NoActionsOrOutcomes = "no actions or outcomes defined"
-  show NoActions = "no actions defined"
-  show NoOutcomes = "no outcomes defined"
+  show (UnknownVar n t) = printf "%s variable %s is undefined" t (show n)
+  show (WrongType n x y) = printf "%s variable %s is not a %s" x (show n) y
 
 type Contextual a o m = (Applicative m, MonadState (Context a o) m, MonadError ContextError m)
 type Evalable a o m = (Eq a, Eq o, Contextual a o m)
 
 emptyContext :: [a] -> [o] -> Context a o
-emptyContext = C Map.empty Map.empty Map.empty
+emptyContext = Context Map.empty
+
+defaultContext :: (Enum a, Enum o) => Context a o
+defaultContext = emptyContext enumerate enumerate
 
 withA :: Name -> a -> Context a o -> Context a o
-withA n a c = c{avars=Map.insert n a $ avars c}
+withA n a c = c{variables=Map.insert n (Action a) $ variables c}
 
 withO :: Name -> o -> Context a o -> Context a o
-withO n o c = c{ovars=Map.insert n o $ ovars c}
+withO n o c = c{variables=Map.insert n (Outcome o) $ variables c}
 
 withN :: Name -> Int -> Context a o -> Context a o
-withN n i c = c{nvars=Map.insert n i $ nvars c}
+withN n i c = c{variables=Map.insert n (Number i) $ variables c}
 
-getA :: Contextual a o m => V a -> m a
-getA (Ref n) = maybe (throwError $ UnknownAVar n) return . Map.lookup n . avars =<< get
+getA :: Contextual a o m => Var a -> m a
+getA (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
+  (Just (Action a)) -> return a
+  (Just (Outcome _)) -> throwError $ WrongType n "action" "outcome"
+  (Just (Number _)) -> throwError $ WrongType n "action" "number"
+  Nothing -> throwError $ UnknownVar n "action"
 getA (Lit a) = return a
 
-getO :: Contextual a o m => V o -> m o
-getO (Ref n) = maybe (throwError $ UnknownOVar n) return . Map.lookup n . ovars =<< get
+getO :: Contextual a o m => Var o -> m o
+getO (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
+  (Just (Outcome o)) -> return o
+  (Just (Action _)) -> throwError $ WrongType n "outcome" "action"
+  (Just (Number _)) -> throwError $ WrongType n "outcome" "number"
+  Nothing -> throwError $ UnknownVar n "outcome"
 getO (Lit o) = return o
 
-getN :: Contextual a o m => V Int -> m Int
-getN (Ref n) = maybe (throwError $ UnknownNVar n) return . Map.lookup n . nvars =<< get
+getN :: Contextual a o m => Var Int -> m Int
+getN (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
+  (Just (Number i)) -> return i
+  (Just (Outcome _)) -> throwError $ WrongType n "action" "outcome"
+  (Just (Action _)) -> throwError $ WrongType n "outcome" "action"
+  Nothing -> throwError $ UnknownVar n "number"
 getN (Lit i) = return i
 
 getAs :: Contextual a o m => m [a]
-getAs = alist <$> get
+getAs = actionList <$> get
 
 getOs :: Contextual a o m => m [o]
-getOs = olist <$> get
+getOs = outcomeList <$> get
 
 defaultAction :: Contextual a o m => m a
 defaultAction = head <$> getAs
 
 -------------------------------------------------------------------------------
 
+data Var a = Ref Name | Lit a deriving (Eq, Ord, Read)
+
+instance Show a => Show (Var a) where
+  show (Ref n) = '$' : T.unpack n
+  show (Lit x) = show x
+
+instance Parsable a => Parsable (Var a) where
+  parser = varParser parser
+
+varParser :: Parsec Text s x -> Parsec Text s (Var x)
+varParser p =   try (Lit <$> p)
+          <|> try (Ref <$> (char '$' *> name))
+          <?> "a variable"
+
+-------------------------------------------------------------------------------
+
 data ModalVar a o = MeVsThemIs a | ThemVsMeIs o | ThemVsOtherIs Name o deriving (Eq, Ord)
+
 instance (Show a, Show o) => Show (ModalVar a o) where
   show (MeVsThemIs a) = "Me(Them)=" ++ show a
   show (ThemVsMeIs o) = "Them(Me)=" ++ show o
@@ -212,25 +169,11 @@ evalVar (ThemVsOtherIs n rel) = evalRelation getO (ThemVsOtherIs n) rel
 
 -------------------------------------------------------------------------------
 
-data V a = Ref Name | Lit a deriving (Eq, Ord, Read)
-instance Show a => Show (V a) where
-  show (Ref n) = '$' : T.unpack n
-  show (Lit x) = show x
-instance Parsable a => Parsable (V a) where
-  parser = vParser parser
-
-vParser :: Parsec Text s x -> Parsec Text s (V x)
-vParser p =   try (Lit <$> p)
-          <|> try (Ref <$> (char '$' *> name))
-          <?> "a variable"
-
--------------------------------------------------------------------------------
-
 data Relation a
-  = Equals (V a)
-  | NotEquals (V a)
-  | In (Set (V a))
-  | NotIn (Set (V a))
+  = Equals (Var a)
+  | NotEquals (Var a)
+  | In (Set (Var a))
+  | NotIn (Set (Var a))
   deriving (Eq, Ord)
 instance Show a => Show (Relation a) where
   show (Equals v) = "=" ++ show v
@@ -241,14 +184,14 @@ instance (Ord a, Parsable a) => Parsable (Relation a) where
   parser = relationParser parser
 
 relationParser :: Ord x => Parsec Text s x -> Parsec Text s (Relation x)
-relationParser p =   try (Equals <$> (sEquals *> vParser p))
-                 <|> try (NotEquals <$> (sNotEquals *> vParser p))
-                 <|> try (In <$> (sIn *> setParser (vParser p)))
-                 <|> try (NotIn <$> (sNotIn *> setParser (vParser p)))
+relationParser p =   try (Equals <$> (sEquals *> varParser p))
+                 <|> try (NotEquals <$> (sNotEquals *> varParser p))
+                 <|> try (In <$> (sIn *> setParser (varParser p)))
+                 <|> try (NotIn <$> (sNotIn *> setParser (varParser p)))
                  <?> "a relation"
 
 evalRelation :: Contextual a o m =>
-  (V x -> m x) -> (x -> v) -> Relation x -> m (ModalFormula v)
+  (Var x -> m x) -> (x -> v) -> Relation x -> m (ModalFormula v)
 evalRelation extract make (Equals var) = L.Var . make <$> extract var
 evalRelation extract make (NotEquals var) = L.Neg <$> evalRelation extract make (Equals var)
 evalRelation extract make (In vs)
@@ -261,7 +204,7 @@ evalRelation extract make (NotIn vs)
 -------------------------------------------------------------------------------
 
 data Expr
-  = Num (V Int)
+  = Num (Var Int)
   | Add Expr Expr
   | Sub Expr Expr
   | Mul Expr Expr
@@ -282,7 +225,7 @@ instance Parsable Expr where
       , [Infix (try $ symbol "^" $> Exp) AssocRight] ]
     term
       =   parens parser
-      <|> try (Num <$> (parser :: Parsec Text s (V Int)))
+      <|> try (Num <$> (parser :: Parsec Text s (Var Int)))
       <?> "a math expression"
 
 evalExpr :: Contextual a o m => Expr -> m Int
@@ -339,7 +282,7 @@ elemsIn getNum getX rng = case rng of
   ListRange xs -> mapM getX xs
   where toThen sta ste = toEnum $ fromEnum sta + ste
 
-elemsInContext :: (Eq x, Evalable a o m) => m [x] -> (V x -> m x) -> Range V x -> m [x]
+elemsInContext :: (Eq x, Evalable a o m) => m [x] -> (Var x -> m x) -> Range Var x -> m [x]
 elemsInContext getXs _    TotalRange = getXs
 elemsInContext _     getX (ListRange xs) = mapM getX xs
 elemsInContext getXs getX (EnumRange sta msto mste) = renum msto mste where
@@ -360,9 +303,9 @@ data Statement oa oo a o
   | Or (Statement oa oo a o) (Statement oa oo a o)
   | Imp (Statement oa oo a o) (Statement oa oo a o)
   | Iff (Statement oa oo a o) (Statement oa oo a o)
-  | Consistent (V Int)
-  | Provable (V Int) (Statement a o a o)
-  | Possible (V Int) (Statement a o a o)
+  | Consistent (Var Int)
+  | Provable (Var Int) (Statement a o a o)
+  | Possible (Var Int) (Statement a o a o)
   deriving Eq
 
 data ShowStatement = ShowStatement {
@@ -437,19 +380,11 @@ statementParser oa oo a o = buildExpressionParser lTable term where
       <|> try (Val <$> val)
       <?> "a statement"
 
-type ModalizedStatement a o = Statement Void Void a o
-
-mstatementParser :: (Ord a, Ord o) => Parsec Text s a -> Parsec Text s o -> Parsec Text s (ModalizedStatement a o)
-mstatementParser = statementParser parser parser
-
-evalStatement :: Contextual a o m => ModalizedStatement a o -> m (ModalFormula (ModalVar a o))
-evalStatement = evalStatement' (\_ -> fail "Where did you even get this element of the Void?")
-
-evalStatement' :: Contextual a o m =>
-  (ModalVar (Relation oa) (Relation oo) -> m (ModalFormula (ModalVar a o))) ->
+evalStatement :: Contextual a o m =>
+  O2I oa oo a o m ->
   Statement oa oo a o ->
   m (ModalFormula (ModalVar a o))
-evalStatement' evar stm = case stm of
+evalStatement evar stm = case stm of
   Val v -> return $ L.Val v
   Var v -> evar v
   Neg x -> L.Neg <$> rec x
@@ -458,23 +393,46 @@ evalStatement' evar stm = case stm of
   Imp x y -> L.Imp <$> rec x <*> rec y
   Iff x y -> L.Iff <$> rec x <*> rec y
   Consistent v -> L.incon <$> getN v
-  Provable v x -> L.boxk <$> getN v <*> evalStatement' evalVar x
-  Possible v x -> L.diak <$> getN v <*> evalStatement' evalVar x
-  where rec = evalStatement' evar
+  Provable v x -> L.boxk <$> getN v <*> evalStatement o2iTrivial x
+  Possible v x -> L.diak <$> getN v <*> evalStatement o2iTrivial x
+  where rec = evalStatement evar
 
 -------------------------------------------------------------------------------
 
-data CodeFragment a o
-  = ForMe Name (Range V a) [CodeFragment a o]
-  | ForThem Name (Range V o) [CodeFragment a o]
-  | ForN Name (Range V Int) [CodeFragment a o]
+type ModalizedStatement a o = Statement Void Void a o
+
+modalizedStatementParser :: (Ord a, Ord o) =>
+  Parsec Text s a -> Parsec Text s o -> Parsec Text s (ModalizedStatement a o)
+modalizedStatementParser = statementParser parser parser
+
+evalModalizedStatement :: Contextual a o m =>
+  ModalizedStatement a o -> m (ModalFormula (ModalVar a o))
+evalModalizedStatement = evalStatement o2iImpossible
+
+-------------------------------------------------------------------------------
+
+type FreeStatement a o = Statement a o a o
+
+freeStatementParser :: (Ord a, Ord o) =>
+  Parsec Text s a -> Parsec Text s o -> Parsec Text s (FreeStatement a o)
+freeStatementParser a o = statementParser a o a o
+
+evalFreeStatement :: Contextual a o m => FreeStatement a o -> m (ModalFormula (ModalVar a o))
+evalFreeStatement = evalStatement o2iTrivial
+
+-------------------------------------------------------------------------------
+
+data CodeFragment oa oo a o
+  = ForMe Name (Range Var a) [CodeFragment oa oo a o]
+  | ForThem Name (Range Var o) [CodeFragment oa oo a o]
+  | ForN Name (Range Var Int) [CodeFragment oa oo a o]
   | LetN Name Expr
-  | If (ModalizedStatement a o) [CodeFragment a o]
-  | EarlyReturn (Maybe (V a))
+  | If (Statement oa oo a o) [CodeFragment oa oo a o]
+  | EarlyReturn (Maybe (Var a))
   | Pass
   deriving Eq
 
-instance (Show a, Show o) => Blockable (CodeFragment a o) where
+instance (Show oa, Show oo, Show a, Show o) => Blockable (CodeFragment oa oo a o) where
   blockLines (ForMe n r cs) =
     [(0, T.pack $ printf "for action %s in %s" (T.unpack n) (show r))] <>
     increaseIndent (concatMap blockLines cs)
@@ -493,84 +451,152 @@ instance (Show a, Show o) => Blockable (CodeFragment a o) where
   blockLines (EarlyReturn (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
   blockLines (Pass) = [(0, "pass")]
 
-instance (Show a, Show o) => Show (CodeFragment a o) where
+instance (Show oa, Show oo, Show a, Show o) => Show (CodeFragment oa oo a o) where
   show = T.unpack . renderBlock
 
-instance (Ord a, Parsable a, Ord o, Parsable o ) => Parsable (CodeFragment a o) where
-  parser = codeFragmentParser parser parser
+instance
+  ( Ord ao
+  , Parsable ao
+  , Ord oo
+  , Parsable oo
+  , Ord a
+  , Parsable a
+  , Ord o
+  , Parsable o
+  ) => Parsable (CodeFragment ao oo a o) where
+  parser = codeFragmentParser parser parser parser parser
 
-codeFragmentParser :: (Ord a, Ord o) => Parsec Text s a -> Parsec Text s o -> Parsec Text s (CodeFragment a o)
-codeFragmentParser a o = pFrag where
+codeFragmentParser :: (Ord ao, Ord oo, Ord a, Ord o) =>
+  Parsec Text s ao -> Parsec Text s oo -> Parsec Text s a -> Parsec Text s o ->
+  Parsec Text s (CodeFragment ao oo a o)
+codeFragmentParser ao oo a o = pFrag where
   pFrag =   try fForMe
         <|> try fForThem
         <|> try fForN
         <|> try fLetN
         <|> try fIf
-        <|> try (EarlyReturn <$> fReturn (vParser a))
+        <|> try (EarlyReturn <$> fReturn (varParser a))
         <|> try fPass
         <?> "a code fragment"
   fLetN = LetN <$> (keyword "let" *> varname <* symbol "=") <*> parser
-  fIf = If <$> (keyword "if" *> mstatementParser a o) <*> fBlock
+  fIf = If <$> (keyword "if" *> statementParser ao oo a o) <*> fBlock
   fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*>
-    (keyword "in" *> rangeParser parser (vParser a)) <*> fBlock
+    (keyword "in" *> rangeParser parser (varParser a)) <*> fBlock
   fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
-    (keyword "in" *> rangeParser parser (vParser o)) <*> fBlock
+    (keyword "in" *> rangeParser parser (varParser o)) <*> fBlock
   fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
     (keyword "in" *> boundedRange) <*> fBlock
   fBlock =   try (keyword "end" $> [])
-         <|> ((:) <$> codeFragmentParser a o <*> fBlock) <?> "a code block"
+         <|> ((:) <$> codeFragmentParser ao oo a o <*> fBlock) <?> "a code block"
   fPass = symbol "pass" $> Pass
   varname = char '$' *> name
 
-evalCodeFragment :: Evalable a o m => CodeFragment a o -> m (Program a o -> Program a o)
-evalCodeFragment code = case code of
+type OuterToInner oa oo a o
+  = O2I oa oo a o (StateT (Context a o) (ExceptT ContextError Identity))
+type O2I oa oo a o m
+  = ModalVar (Relation oa) (Relation oo) -> m (ModalFormula (ModalVar a o))
+
+o2iImpossible :: Monad m => O2I Void Void a o m
+o2iImpossible _ = fail "Where did you even get this element of the Void?"
+
+o2iTrivial :: Contextual a o m => O2I a o a o m
+o2iTrivial = evalVar
+
+evalCodeFragment :: Evalable a o m =>
+  O2I oa oo a o m -> CodeFragment oa oo a o -> m (Program a o -> Program a o)
+evalCodeFragment o2i code = case code of
   ForMe n r inner -> loop (withA n) inner =<< elemsInContext getAs getA r
   ForThem n r inner -> loop (withO n) inner =<< elemsInContext getOs getO r
   ForN n r inner -> loop (withN n) inner =<< elemsInContext (return [0..]) getN r
   LetN n x -> evalExpr x >>= modify . withN n >> return id
   If s block -> do
-    cond <- evalStatement s
-    thens <- mapM evalCodeFragment block
+    cond <- evalStatement o2i s
+    thens <- mapM (evalCodeFragment o2i) block
     let yes = foldr1 (.) thens
     return (\continue -> ModalProgram $ \act ->
       (cond %^ formulaFor (yes continue) act) %| (L.Neg cond %^ formulaFor continue act))
-  EarlyReturn x -> const <$> evalCode (Return x)
+  EarlyReturn x -> const <$> evalCode o2i (Return x)
   Pass -> return id
   where loop update block xs
           | null xs = return id
           | otherwise = foldr1 (.) . concat <$> sequence fragments
-          where fragments = [modify (update x) >> mapM evalCodeFragment block | x <- xs]
+          where fragments = [modify (update x) >> mapM (evalCodeFragment o2i) block | x <- xs]
 
 -------------------------------------------------------------------------------
 
-data Code a o
-  = Fragment (CodeFragment a o) (Code a o)
-  | Return (Maybe (V a))
+data Code ao oo a o
+  = Fragment (CodeFragment ao oo a o) (Code ao oo a o)
+  | Return (Maybe (Var a))
   deriving Eq
 
-instance (Show a, Show o) => Blockable (Code a o) where
+instance (Show ao, Show oo, Show a, Show o) => Blockable (Code ao oo a o) where
   blockLines (Fragment f c) = blockLines f ++ blockLines c
   blockLines (Return Nothing) = [(0, "return")]
   blockLines (Return (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
 
-instance (Show a, Show o) => Show (Code a o) where
+instance (Show ao, Show oo, Show a, Show o) => Show (Code ao oo a o) where
   show = T.unpack . renderBlock
 
-instance (Ord a, Parsable a, Ord o, Parsable o) => Parsable (Code a o) where
-  parser = codeParser parser parser
+instance
+  ( Ord ao
+  , Parsable ao
+  , Ord oo
+  , Parsable oo
+  , Ord a
+  , Parsable a
+  , Ord o
+  , Parsable o) => Parsable (Code ao oo a o) where
+  parser = codeParser parser parser parser parser
 
-codeParser :: (Ord a, Ord o) => Parsec Text s a -> Parsec Text s o -> Parsec Text s (Code a o)
-codeParser a o =   try (Fragment <$> codeFragmentParser a o <*> codeParser a o)
-               <|> try (Return <$> fReturn (vParser a))
-               <?> "some code"
+codeParser :: (Ord ao, Ord oo, Ord a, Ord o) =>
+  Parsec Text s ao -> Parsec Text s oo -> Parsec Text s a -> Parsec Text s o ->
+  Parsec Text s (Code ao oo a o)
+codeParser ao oo a o
+  =   try (Fragment <$> codeFragmentParser ao oo a o <*> codeParser ao oo a o)
+  <|> try (Return <$> fReturn (varParser a))
+  <?> "some code"
 
-evalCode :: Evalable a o m => Code a o -> m (Program a o)
-evalCode (Fragment f cont) = evalCodeFragment f >>= (<$> evalCode cont)
-evalCode (Return Nothing) = defaultAction >>= evalCode . Return . Just . Lit
-evalCode (Return (Just v)) = ModalProgram . (L.Val .) . (==) <$> getA v
+evalCode :: Evalable a o m => O2I oa oo a o m -> Code oa oo a o -> m (Program a o)
+evalCode o2i (Fragment f cont) = evalCodeFragment o2i f >>= (<$> evalCode o2i cont)
+evalCode o2i (Return Nothing) = defaultAction >>= evalCode o2i . Return . Just . Lit
+evalCode _ (Return (Just v)) = ModalProgram . (L.Val .) . (==) <$> getA v
 
-codeToProgram :: (Eq a, Eq o) => [a] -> [o] -> Code a o -> Either ContextError (Program a o)
-codeToProgram as os code = runExcept $ fst <$> runStateT (evalCode code) (emptyContext as os)
+codeToProgram :: (Eq a, Eq o) =>
+  O2I oa oo a o (StateT (Context a o) (ExceptT ContextError Identity)) ->
+  Context a o ->
+  Code oa oo a o ->
+  Either ContextError (Program a o)
+codeToProgram o2i context code = runExcept $ fst <$> runStateT (evalCode o2i code) context
+
+-------------------------------------------------------------------------------
+
+type ModalizedCode a o = Code Void Void a o
+
+evalModalizedCode :: Evalable a o m => ModalizedCode a o -> m (Program a o)
+evalModalizedCode = evalCode o2iImpossible
+
+modalizedCodeParser :: (Ord a, Ord o) =>
+  Parsec Text s a -> Parsec Text s o -> Parsec Text s (ModalizedCode a o)
+modalizedCodeParser = codeParser parser parser
+
+modalizedCodeToProgram :: (Eq a, Eq o) =>
+  Context a o -> ModalizedCode a o -> Either ContextError (Program a o)
+modalizedCodeToProgram = codeToProgram o2iImpossible
+
+-------------------------------------------------------------------------------
+
+type FreeCode a o = Code a o a o
+
+evalFreeCode :: Evalable a o m => FreeCode a o -> m (Program a o)
+evalFreeCode = evalCode o2iTrivial
+
+freeCodeParser :: (Ord a, Ord o) =>
+  Parsec Text s a -> Parsec Text s o -> Parsec Text s (FreeCode a o)
+freeCodeParser a o = codeParser a o a o
+
+freeCodeToProgram :: (Eq a, Eq o) =>
+  Context a o -> FreeCode a o -> Either ContextError (Program a o)
+freeCodeToProgram = codeToProgram o2iTrivial
 
 -------------------------------------------------------------------------------
 
@@ -653,7 +679,7 @@ lIff = sym $> Iff where
       <|> try (keyword "iff")
       <?> "a biconditional"
 
-constant :: Parsec Text s (V Int -> Statement a b c d) -> Parsec Text s (Statement a b c d)
+constant :: Parsec Text s (Var Int -> Statement a b c d) -> Parsec Text s (Statement a b c d)
 constant x = x <*> option (Lit 0) parser
 
 quoted :: Parsec Text s a -> Parsec Text s a
@@ -662,7 +688,7 @@ quoted x
   <|> try (between (symbol "[") (symbol "]") x)
   <?> "something quoted"
 
-cCon :: Parsec Text s (V Int -> Statement a b c d)
+cCon :: Parsec Text s (Var Int -> Statement a b c d)
 cCon = symbol "Con" $> Consistent
 
 fProvable :: Parsec Text s (Statement c d c d -> Statement a b c d)
@@ -679,8 +705,8 @@ fPossible = try inSym <|> choice [try $ afterSym s | s <- syms] <?> "a diamond" 
 
 relVar :: (Ord a, Ord o) => Parsec Text s a -> Parsec Text s o -> Parsec Text s (ModalVar (Relation a) (Relation o))
 relVar a o = try meVsThem <|> try themVsMe <|> try themVsOther <?> "a modal variable" where
-  meVsThem = string "Me(Them)" *> (MeVsThemIs <$> relationParser a)
-  themVsMe = string "Them(Me)" *> (ThemVsMeIs <$> relationParser o)
+  meVsThem = choice [string "Me(Them)", string "Me()"] *> (MeVsThemIs <$> relationParser a)
+  themVsMe = choice [string "Them(Me)", string "Them()"] *> (ThemVsMeIs <$> relationParser o)
   themVsOther = string "Them(" *> (ThemVsOtherIs <$> name) <*> (char ')' *> relationParser o)
 
 fReturn :: Parsec Text s a -> Parsec Text s (Maybe a)
