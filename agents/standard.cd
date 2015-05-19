@@ -6,30 +6,35 @@ def FB
     return C
   end
   return D
+end
 
 def PB
   if [1]⌜Them(DB)=D⌝ ∧ □⌜Them(Me)=C⌝
     return C
   end
   return D
+end
 
 def NB
   if □⌜Them(CB)=C⌝
     return C
   end
   return D
+end
 
 def JB
   if □⌜Them(FB)=C⌝
     return C
   end
   return D
+end
 
 def TB
   if □⌜Them(DB)=C⌝
     return C
   end
   return D
+end
 
 play FB FB
 describe FB PB

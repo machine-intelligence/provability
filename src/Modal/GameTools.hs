@@ -37,8 +37,8 @@ gameMap :: (Ord u, Enum u, Ord a, Enum a) =>
   ModalProgram a (U1 u a) ->
   Map (U1 u a) (ModalFormula (U1 u a))
 gameMap universe agent = Map.fromList $ us ++ as where
-  us = [(U1 u, U1A <$> formulaFor universe u) | u <- enumerate]
-  as = [(U1A a, formulaFor agent a) | a <- enumerate]
+  us = [(U1 u, U1A <$> universe u) | u <- enumerate]
+  as = [(U1A a, agent a) | a <- enumerate]
 
 resolveGame :: (Ord u, Enum u, Ord a, Enum a) =>
   Map (U1 u a) (ModalFormula (U1 u a)) ->
@@ -97,9 +97,9 @@ gameMap2 :: (Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
   ModalProgram a2 (U1 u a2) ->
   Map (U2 u a1 a2) (ModalFormula (U2 u a1 a2))
 gameMap2 universe agent1 agent2 = Map.fromList $ us ++ a1s ++ a2s where
-  us = [(U2 u, promoteToA <$> formulaFor universe u) | u <- enumerate]
-  a1s = [(U2A1 a1, promoteTo1 <$> formulaFor agent1 a1) | a1 <- enumerate]
-  a2s = [(U2A2 a2, promoteTo2 <$> formulaFor agent2 a2) | a2 <- enumerate]
+  us = [(U2 u, promoteToA <$> universe u) | u <- enumerate]
+  a1s = [(U2A1 a1, promoteTo1 <$> agent1 a1) | a1 <- enumerate]
+  a2s = [(U2A2 a2, promoteTo2 <$> agent2 a2) | a2 <- enumerate]
   promoteToA (Left a) = U2A1 a
   promoteToA (Right a) = U2A2 a
   promoteTo1 (U1A a) = U2A1 a

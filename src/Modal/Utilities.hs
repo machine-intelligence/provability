@@ -6,8 +6,10 @@ module Modal.Utilities
   , (<$$>)
   , Name
   , Void
-  , die
   , enumerate
+  , alter
+  , every
+  , die
   , force
   , run
   , runFile
@@ -47,6 +49,15 @@ instance Show Void
 
 enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)
+
+alter :: [a] -> Int -> (a -> a) -> [a]
+alter [] _ _ = error "empty list"
+alter (x:xs) 0 f = f x : xs
+alter (x:xs) n f = x : alter xs (pred n) f
+
+every :: Int -> [a] -> [a]
+every n (x : xs) = x : every n (drop (pred n) xs)
+every _ [] = []
 
 die :: Show a => a -> IO b
 die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure

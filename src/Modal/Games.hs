@@ -12,9 +12,8 @@ instance Show FiveOrTen where
   show Five = "5"
 
 fiveAndTen :: ModalProgram FiveOrTen FiveOrTen
-fiveAndTen = ModalProgram game where
-  game Five = Var Five
-  game Ten = Var Ten
+fiveAndTen Five = Var Five
+fiveAndTen Ten = Var Ten
 
 
 data OneOrTwo = OneBox | TwoBox deriving (Eq, Ord, Read, Enum)
@@ -35,11 +34,10 @@ oneboxes = Var OneBox
 twoboxes = Neg oneboxes
 
 newcomb :: Int -> ModalProgram NewcombOutcome OneOrTwo
-newcomb k = ModalProgram game where
-  game MillionThousand = twoboxes %^      boxk k oneboxes
-  game Million         = oneboxes %^      boxk k oneboxes
-  game Thousand        = twoboxes %^ Neg (boxk k oneboxes)
-  game Naught          = oneboxes %^ Neg (boxk k oneboxes)
+newcomb k MillionThousand = twoboxes %^      boxk k oneboxes
+newcomb k Million         = oneboxes %^      boxk k oneboxes
+newcomb k Thousand        = twoboxes %^ Neg (boxk k oneboxes)
+newcomb k Naught          = oneboxes %^ Neg (boxk k oneboxes)
 
 
 data AorB = A| B deriving (Eq, Ord, Read, Enum)
@@ -53,20 +51,16 @@ doesA = Var A
 doesB = Neg doesA
 
 aGame :: Int -> ModalProgram GoodOrBad AorB
-aGame k = ModalProgram game where
-  game Good = boxk k doesA
-  game Bad  = Neg (boxk k doesA)
+aGame k Good = boxk k doesA
+aGame k Bad  = Neg (boxk k doesA)
 
 bGame :: Int -> ModalProgram GoodOrBad AorB
-bGame k = ModalProgram game where
-  game Good = boxk k doesB
-  game Bad  = Neg (boxk k doesB)
+bGame k Good = boxk k doesB
+bGame k Bad  = Neg (boxk k doesB)
 
 abAgent :: ModalProgram GoodOrBad AorB -> ModalProgram AorB AorB
-abAgent univ = ModalProgram f where
-  f A = Box $ Var A %> formulaFor univ Good
-  f B = Neg $ Box $ Var A %> formulaFor univ Good
-
+abAgent univ A = Box $ Var A %> univ Good
+abAgent univ B = Neg $ Box $ Var A %> univ Good
 
 data Strangeverse = Three | Two | One deriving (Eq, Ord, Read, Enum)
 instance Show Strangeverse where
@@ -83,10 +77,9 @@ doesAlpha = Var Alpha
 doesBeta  = Neg doesAlpha
 
 strangeverse :: Int -> ModalProgram Strangeverse Strangeact
-strangeverse k = ModalProgram game where
-  game Three  = doesAlpha %^ boxk k doesBeta
-  game Two = doesBeta
-  game One = doesAlpha %^ Neg (boxk k doesBeta)
+strangeverse k Three  = doesAlpha %^ boxk k doesBeta
+strangeverse k Two = doesBeta
+strangeverse k One = doesAlpha %^ Neg (boxk k doesBeta)
 
 
 data PD = DC | CC | DD | CD deriving (Eq, Ord, Read, Enum)
@@ -101,11 +94,10 @@ instance Show CorD where
   show D = "D"
 
 prisonersDilemma :: ModalProgram PD (Either CorD CorD)
-prisonersDilemma = ModalProgram game where
-  game DC = And (Var $ Left D) (Var $ Right C)
-  game CC = And (Var $ Left C) (Var $ Right C)
-  game DD = And (Var $ Left D) (Var $ Right D)
-  game CD = And (Var $ Left C) (Var $ Right D)
+prisonersDilemma DC = And (Var $ Left D) (Var $ Right C)
+prisonersDilemma CC = And (Var $ Left C) (Var $ Right C)
+prisonersDilemma DD = And (Var $ Left D) (Var $ Right D)
+prisonersDilemma CD = And (Var $ Left C) (Var $ Right D)
 
 pdGameMap :: Map (U2 PD CorD CorD) (ModalFormula (U2 PD CorD CorD))
 pdGameMap = gameMap2 prisonersDilemma udtA udtB where
