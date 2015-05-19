@@ -6,13 +6,13 @@ import Data.Bifoldable
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Foldable
+import Data.Map (Map)
 import Data.Text (Text)
 import Data.Traversable
 import Modal.Code
 import Modal.Combat (MeVsThem(..))
 import Modal.Competition
 import Modal.Display
-import Modal.Environment
 import Modal.Formulas
 import Modal.Parser
 import Modal.Utilities
@@ -70,135 +70,128 @@ instance IsMultiVarU UniverseVar where
   promoteU names (PlayerNvsU i univ x) = PlayerPlays (alter names 0 $ const univ) i x
   promoteU names (IPlay x) = UniversePlays names x
 
+data AgentConfig = AgentConfig
+  { acArgs :: Map Name (Val Text Text)
+  , acActs :: [Text]
+  , acOuts :: [Text]
+  } deriving (Eq, Ord, Show)
+
 data GameObject
-  = ActionsAre [Name]
-  | OutcomesAre [Name]
-  | Agent (ModalizedDef MeVsThem Text Text)
+  = Agent (ModalizedDef MeVsThem Text Text)
   | Universe (UnrestrictedDef UniverseVar Text Text)
-  | Play Name Name
-  | Describe Name Name
-  deriving Eq
+  | Play (Name, Parameters Text Text) [(Name, Parameters Text Text)]
+  | Describe (Name, Parameters Text Text) [(Name, Parameters Text Text)]
+  deriving (Eq, Show)
 
-instance Show GameObject where
-  show (ActionsAre as) = printf "Actions: %s" (List.intercalate "," $ map Text.unpack as)
-  show (OutcomesAre os) = printf "Outcomes: %s" (List.intercalate "," $ map Text.unpack os)
-  show (Agent a) = show a
-  show (Universe u) = show u
-  show (Play n1 n2) = printf "play %s %s" (Text.unpack n1) (Text.unpack n2)
-  show (Describe n1 n2) = printf "describe %s %s" (Text.unpack n1) (Text.unpack n2)
+atParser, dollarParser :: Parsec Text s Name
+atParser = char '@' *> name
+dollarParser = char '$' *> name
 
-data ParserState = PS { getAs :: Maybe [Name], getOs :: Maybe [Name] }
 
-freshState :: ParserState
-freshState = PS Nothing Nothing
+instance Parsable GameObject where
+  parser = try a <|> try u <|> try (play Play "play") <|> play Describe "describe" where
+    a = Agent <$> modalizedDefParser
+      atParser dollarParser "actions" "outcomes" "agent"
+    u = Universe <$> unrestrictedDefParser
+      dollarParser atParser "outcomes" "actions" "universe"
+    play make word = keyword word *> (make <$> callU <*> many1 callA)
+    callU = (,) <$> name <*> paramsParser dollarParser atParser
+    callA = (,) <$> name <*> paramsParser atParser dollarParser
 
-setAs :: [Name] -> ParserState -> Maybe ParserState
-setAs as (PS Nothing os) = Just $ PS (Just as) os
-setAs _ _ = Nothing
+gameParser :: Parsec Text s [GameObject]
+gameParser = (parser `sepEndBy` w) <* eof
 
-setOs :: [Name] -> ParserState -> Maybe ParserState
-setOs os (PS as Nothing) = Just $ PS as (Just os)
-setOs _ _ = Nothing
-
-gameObjectParser :: Parsec Text ParserState GameObject
-gameObjectParser
-  = try acts
-  <|> try outs
-  <|> try agent
-  <|> try universe
-  <|> try pPlay
-  <|> try pDescribe
-  <?> "a game object"
-  where
-   acts = do
-     keyword "actions"
-     a <- name `sepBy` w1
-     state <- getState
-     case setAs a state of
-       Nothing -> fail "Actions set twice."
-       Just newstate -> putState newstate $> ActionsAre a
-   outs = do
-     keyword "outcomes"
-     o <- name `sepBy` w1
-     state <- getState
-     case setOs o state of
-       Nothing -> fail "Outcomes set twice."
-       Just newstate -> putState newstate $> OutcomesAre o
-   agent = do
-     state <- getState
-     case state of
-       PS Nothing Nothing -> fail "Actions and outcomes not set."
-       PS Nothing _ -> fail "Actions not set."
-       PS _ Nothing -> fail "Outcomes not set."
-       PS (Just as) (Just os) -> Agent <$> modalizedDefParser
-        (pick as) (pick os) "actions" "outcomes" "agent"
-   universe = do
-     state <- getState
-     case state of
-       PS Nothing Nothing -> fail "Actions and outcomes not set."
-       PS Nothing _ -> fail "Actions not set."
-       PS _ Nothing -> fail "Outcomes not set."
-       PS (Just as) (Just os) -> Universe <$> unrestrictedDefParser
-        (pick os) (pick as) "outcomes" "actions" "universe"
-   pick xs = choice [Text.pack <$> string (Text.unpack x) | x <- xs]
-   pPlay = Play <$> (keyword "play" *> name) <*> (keyword "vs" *> name)
-   pDescribe = Describe <$> (keyword "describe" *> name) <*> (keyword "vs" *> name)
-
-gameParser :: Parsec Text ParserState [GameObject]
-gameParser = (gameObjectParser `sepEndBy` w) <* eof
-
-mapAgents :: (ModalizedDef MeVsThem Text Text -> a) -> [GameObject] -> [a]
-mapAgents _ [] = []
+mapAgents :: (Agent -> a) -> [GameObject] -> [a]
 mapAgents f (Agent x : xs) = f x : mapAgents f xs
 mapAgents f (_ : xs) = mapAgents f xs
+mapAgents _ [] = []
 
-mapUniverses :: (UnrestrictedDef UniverseVar Text Text -> a) -> [GameObject] -> [a]
-mapUniverses _ [] = []
+mapUniverses :: (Universe -> a) -> [GameObject] -> [a]
 mapUniverses f (Universe x : xs) = f x : mapUniverses f xs
 mapUniverses f (_ : xs) = mapUniverses f xs
+mapUniverses _ [] = []
 
-parseFile :: FilePath -> IO ([GameObject], ParserState)
-parseFile path = runFile (runParser getGameAndState freshState path) path where
-  getGameAndState = (,) <$> gameParser <*> getState
+agentList :: [GameObject] -> [Agent]
+agentList (Agent x : xs) = x : agentList xs
+agentList (_ : xs) = agentList xs
+agentList [] = []
 
-compileGame :: ([GameObject], ParserState) ->
-  IO ([(Name, AgentMap UniverseVar Text Text)], [(Name, AgentMap MeVsThem Text Text)])
-compileGame (objects, state) = do
-  as <- maybe (fail "No actions given.") return (getAs state)
-  os <- maybe (fail "No outcomes given.") return (getOs state)
-  universes <- run $ sequence (mapUniverses (compileUnrestrictedAgent $ emptyContext os as) objects)
-  agents <- run $ sequence (mapAgents (compileModalizedAgent $ emptyContext as os) objects)
-  return (universes, agents)
+universeList :: [GameObject] -> [Universe]
+universeList (Universe x : xs) = x : universeList xs
+universeList (_ : xs) = universeList xs
+universeList [] = []
 
-doAction :: Env UniverseVar Text Text -> Env MeVsThem Text Text -> GameObject -> IO ()
-doAction uEnv aEnv (Play n1 n2) = do
-  void $ printf "%s vs %s:\n" (Text.unpack n1) (Text.unpack n2)
-  (r1, r2) <- run (compete2 uEnv aEnv n1 n2)
-  void $ printf "  %s=%s, %s=%s\n\n" (Text.unpack n1) (show r1) (Text.unpack n2) (show r2)
-doAction uEnv aEnv (Describe n1 n2) = do
-  void $ printf "%s vs %s:\n\n" (Text.unpack n1) (Text.unpack n2)
-  cmap <- run (competitionMap2 uEnv aEnv n1 n2)
+parseFile :: FilePath -> IO [GameObject]
+parseFile path = runFile (runParser gameParser () path) path where
+
+type Agent = ModalizedDef MeVsThem Text Text
+type Agents = Map Name Agent
+getAgent :: Agents -> Name -> Either CompileError Agent
+getAgent as n = maybe (Left $ UnknownName n) Right (Map.lookup n as)
+
+type Universe = UnrestrictedDef UniverseVar Text Text
+type Universes = Map Name Universe
+getUniv :: Universes -> Name -> Either CompileError Universe
+getUniv as n = maybe (Left $ UnknownName n) Right (Map.lookup n as)
+
+joinVars :: (Eq a, Eq u) =>
+  UnrestrictedDef UniverseVar u a ->
+  ModalizedDef MeVsThem a u ->
+  Either CompileError (ModalizedDef MeVsThem a u)
+joinVars u a = do
+  acts <- check "actions" (agentOutcomes u) (agentActions a)
+  outs <- check "outcomes" (agentActions u) (agentOutcomes a)
+  return a{agentActions=acts, agentOutcomes=outs}
+  where check str x y = case (x, y) of
+                         (Nothing, Nothing) -> return Nothing
+                         (Just xs, Nothing) -> return $ Just xs
+                         (Nothing, Just ys) -> return $ Just ys
+                         (Just xs, Just ys)
+                           | xs == ys  -> return (Just xs)
+                           | otherwise -> Left (Mismatch (agentName a) str)
+
+_buildPairs ::
+  Name -> Parameters Text Text -> [(Name, Parameters Text Text)] ->
+  Agents -> Universes ->
+  IO ((Name, AgentMap UniverseVar Text Text), [(Name, AgentMap MeVsThem Text Text)])
+_buildPairs uname uparams anps as us = do
+  udef <- run $ getUniv us uname
+  adefs <- run $ mapM (getAgent as . fst) anps
+  adefs' <- run $ mapM (joinVars udef) adefs
+  upair <- run $ compileUnrestrictedAgent uparams udef
+  apairs <- run $ mapM (\(d, p) -> compileModalizedAgent p d) (zip adefs' (map snd anps))
+  return (upair, apairs)
+
+doAction :: Agents -> Universes -> GameObject -> IO ()
+doAction as us (Play (uname, uparams) anps) = do
+  void $ printf "%s(%s)\n" (Text.unpack uname)
+    (List.intercalate ("," :: String) (map (Text.unpack . fst) anps))
+  (upair, apairs) <- _buildPairs uname uparams anps as us
+  (ur, ars) <- run $ simpleMultiCompete upair apairs
+  void $ printf "  %s(%s)\n" (Text.unpack ur) (List.intercalate "," $ map Text.unpack ars)
+doAction as us (Describe (uname, uparams) anps) = do
+  void $ printf "%s(%s)\n" (Text.unpack uname)
+    (List.intercalate ("," :: String) (map (Text.unpack . fst) anps))
+  (upair, apairs) <- _buildPairs uname uparams anps as us
+  cmap <- run $ simpleMultiCompetition upair apairs
   displayTable $ indentTable "  " $ tuplesToTable $ Map.toAscList cmap
   displayTable $ indentTable "  " $ kripkeTable cmap
-  (r1, r2) <- run (compete2 uEnv aEnv n1 n2)
-  printf "  Result: %s=%s, %s=%s\n\n" (Text.unpack n1) (show r1) (Text.unpack n2) (show r2)
+  (ur, ars) <- run $ simpleMultiCompete upair apairs
+  void $ printf "  %s(%s)\n" (Text.unpack ur) (List.intercalate "," $ map Text.unpack ars)
 doAction _ _ _ = return ()
 
-playGame ::
-  Env UniverseVar Text Text ->
-  Env MeVsThem Text Text ->
-  ([GameObject], ParserState) ->
-  IO ()
-playGame uBase aBase (objects, state) = do
-  (universes, agents) <- compileGame (objects, state)
-  uEnv <- run $ insertAll uBase universes
-  aEnv <- run $ insertAll aBase agents
+playGame :: [GameObject] -> IO ()
+playGame objects = do
+  let agentDefs = agentList objects
+  let universeDefs = universeList objects
   putStr "Universes loaded: "
-  print uEnv
+  print (map agentName agentDefs)
   putStr "Agents loaded: "
-  print aEnv
+  print (map agentName universeDefs)
   putStrLn ""
-  mapM_ (doAction uEnv aEnv) objects
+  let agents = Map.fromList [(agentName a, a) | a <- agentDefs]
+  let universes = Map.fromList [(agentName u, u) | u <- universeDefs]
+  mapM_ (doAction agents universes) objects
 
-playFile :: Env UniverseVar Text Text -> Env MeVsThem Text Text -> FilePath -> IO ()
-playFile uEnv aEnv path = parseFile path >>= playGame uEnv aEnv
+playFile :: FilePath -> IO ()
+playFile path = parseFile path >>= playGame

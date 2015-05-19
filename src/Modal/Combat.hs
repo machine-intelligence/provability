@@ -187,7 +187,7 @@ playGame game base = do
 compileFile :: FilePath -> IO (Game (Name, ModalAgent))
 compileFile path = do
   game <- runFile (parse gameParser path) path
-  run $ mapM (compileModalizedAgent defaultContext) game
+  run $ mapM (compileModalizedAgent noParameters) game
 
 playFile :: FilePath -> Env MeVsThem CD CD -> IO ()
 playFile path env = compileFile path >>= flip playGame env

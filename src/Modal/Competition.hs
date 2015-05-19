@@ -164,3 +164,17 @@ multiCompete une pnes = do
   let UniversePlays _ u = extractPMEEkey (isEntryFor names 0) fixpt
   return (u, [let PlayerPlays _ _ x = extractPMEEkey (isEntryFor names n) fixpt
               in x | n <- [1 .. length pnes]])
+
+simpleMultiCompetition :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
+  (Name, AgentMap uv u a) ->
+  [(Name, AgentMap av a u)] ->
+  Either CompetitionError (MultiCompetition u a)
+simpleMultiCompetition (uName, uAgent) as = multiCompetition
+  (uName, trivialEnv uName uAgent) (map (\(n, a) -> (n, trivialEnv n a)) as)
+
+simpleMultiCompete :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
+  (Name, AgentMap uv u a) ->
+  [(Name, AgentMap av a u)] ->
+  Either CompetitionError (u, [a])
+simpleMultiCompete (uName, uAgent) as = multiCompete
+  (uName, trivialEnv uName uAgent) (map (\(n, a) -> (n, trivialEnv n a)) as)

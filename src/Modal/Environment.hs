@@ -2,6 +2,7 @@
 module Modal.Environment
   ( Env
   , nobody
+  , trivialEnv
   , subagents
   , participants
   , rankedParticipants
@@ -26,8 +27,6 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 
-type CompiledAgent v a o = Map a (ModalFormula (v a o))
-
 --------------------------------------------------------------------------------
 -- Helper functions to verify that modal formulas and modal programs are fully
 -- modalized (which is necessary in order to guarantee a fixpoint).
@@ -38,10 +37,10 @@ isModalized = modalEval ModalEvaluator {
   handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
   handleBox = const True, handleDia = const True }
 
-isFullyModalized :: CompiledAgent v a o -> Bool
+isFullyModalized :: AgentMap v a o -> Bool
 isFullyModalized = all isModalized . Map.elems
 
-subagents :: AgentVar v => CompiledAgent v a o -> Set Name
+subagents :: AgentVar v => AgentMap v a o -> Set Name
 subagents = Set.unions . map fSubagents . Map.elems where
   fSubagents = Set.fromList . extractName . allVars
   extractName = concatMap otherAgentsReferencedBy
@@ -52,7 +51,7 @@ subagents = Set.unions . map fSubagents . Map.elems where
 -- type O. That is, these agents can return elements of A and face opponents
 -- who can return elements of O.
 
-newtype Env v a o = Env { _participants :: Map Name (CompiledAgent v a o, Int) }
+newtype Env v a o = Env { _participants :: Map Name (AgentMap v a o, Int) }
 
 instance Show (Env v a o) where
 	show (Env ps) = printf "{%s}" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
@@ -60,18 +59,21 @@ instance Show (Env v a o) where
 nobody :: Env v a o
 nobody = Env Map.empty
 
-missingSubagents :: AgentVar v => Env v a o -> CompiledAgent v a o-> Set Name
+trivialEnv :: Name -> AgentMap v a o -> Env v a o
+trivialEnv n a = Env (Map.singleton n (a, 0))
+
+missingSubagents :: AgentVar v => Env v a o -> AgentMap v a o-> Set Name
 missingSubagents env agent = subagents agent Set.\\ namesIn env where
   namesIn = Set.fromList . Map.keys . _participants
 
-participants :: Env v a o -> Map Name (CompiledAgent v a o)
+participants :: Env v a o -> Map Name (AgentMap v a o)
 participants = Map.map fst . _participants
 
 -- The modal rank of each agent is tracked, but not yet used.
 rankedParticipants :: Env v a o -> Map Name Int
 rankedParticipants = Map.map snd . _participants
 
-rankIn :: AgentVar v => Env v a o -> Name -> CompiledAgent v a o -> Either EnvError Int
+rankIn :: AgentVar v => Env v a o -> Name -> AgentMap v a o -> Either EnvError Int
 rankIn env name agent = if null missings then Right rank else Left err where
   err = MissingSubagents name (Set.fromList missings)
   rank = if null ranks then 0 else succ $ maximum ranks
@@ -100,7 +102,7 @@ instance Show EnvError where
 
 -- This is the safe way of inserting an agent into an environment.
 insert :: AgentVar v =>
-  Env v a o -> Name -> CompiledAgent v a o -> Either EnvError (Env v a o)
+  Env v a o -> Name -> AgentMap v a o -> Either EnvError (Env v a o)
 insert env name agent = do
   (unless $ isFullyModalized agent) (Left $ IsNotModalized name)
   (when $ Map.member name $ _participants env) (Left $ NameCollision name)
@@ -108,27 +110,27 @@ insert env name agent = do
   return env{_participants=Map.insert name (agent, rank) (_participants env)}
 
 insertAll :: AgentVar v =>
-  Env v a o -> [(Name, CompiledAgent v a o)] -> Either EnvError (Env v a o)
+  Env v a o -> [(Name, AgentMap v a o)] -> Either EnvError (Env v a o)
 insertAll env ((n, p):xs) = insert env n p >>= flip insertAll xs
 insertAll env [] = Right env
 
 -- A safe way to start building an environment.
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
 (@<) :: (AgentVar v, Enum a) =>
-  Env v a o -> (Name, CompiledAgent v a o) -> Either EnvError (Env v a o)
+  Env v a o -> (Name, AgentMap v a o) -> Either EnvError (Env v a o)
 (@<) e = uncurry (insert e)
 
 -- A safe combinator for continuing to build an environment
 -- Example: env = nobody @< cooperateBot @+ defectBot @+ fairBot
 (@+) :: (AgentVar v, Enum a) =>
-  Either EnvError (Env v a o) -> (Name, CompiledAgent v a o) -> Either EnvError (Env v a o)
+  Either EnvError (Env v a o) -> (Name, AgentMap v a o) -> Either EnvError (Env v a o)
 e @+ nf = e >>= (@< nf)
 
 -- An inline version of insertAll
 (@++) :: (AgentVar v, Enum a) =>
-  Either EnvError (Env v a o) -> [(Name, CompiledAgent v a o)] -> Either EnvError (Env v a o)
+  Either EnvError (Env v a o) -> [(Name, AgentMap v a o)] -> Either EnvError (Env v a o)
 e @++ nps = e >>= flip insertAll nps
 
 -- The unsafe way of building environments
-(@!) :: (AgentVar v, Enum a) => Env v a o -> (Name, CompiledAgent v a o) -> Env v a o
+(@!) :: (AgentVar v, Enum a) => Env v a o -> (Name, AgentMap v a o) -> Env v a o
 (@!) e = uncurry (force .: insert e)

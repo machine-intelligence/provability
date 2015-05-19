@@ -1,6 +1,5 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DeriveFunctor #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -20,10 +19,16 @@ module Modal.Code
 
   ---
   , agentName
-  , agentDefaults
+  , agentArgs
   , agentActions
   , agentOutcomes
   , agentCode
+  ---
+  , Parameters(..)
+  , noParameters
+  , paramsParser
+  , argsParser
+  , orderParser
   ---
 
   ---
@@ -40,7 +45,7 @@ module Modal.Code
   , getN
   , emptyContext
   , defaultContext
-  , ContextError(..)
+  , CompileError(..)
   ---
   , SimpleExpr(..)
   ---
@@ -76,7 +81,6 @@ import Control.Monad.State hiding (mapM, sequence, state)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Map (Map)
-import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Data.Foldable
@@ -98,22 +102,44 @@ import qualified Modal.Formulas as L
 
 data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
 
+typeOf :: Val a o -> String
+typeOf (Number _) = "number"
+typeOf (Action _) = "action"
+typeOf (Outcome _) = "outcome"
+
+typesMatch :: Val a o -> Val a o -> Bool
+typesMatch x y = typeOf x == typeOf y
+
+-------------------------------------------------------------------------------
+
 data Context a o = Context
   { variables :: Map Name (Val a o)
   , actionList :: [a]
   , outcomeList :: [o]
   } deriving (Eq, Show)
 
-data ContextError
+data CompileError
   = UnknownVar Name String
   | WrongType Name String String
+  | UnknownArg Name Name
+  | UnknownName Name
+  | ArgMissing Name Name
+  | TooManyArgs Name
+  | Mismatch Name String
+  | Missing Name String
   deriving (Eq, Ord)
 
-instance Show ContextError where
+instance Show CompileError where
   show (UnknownVar n t) = printf "%s variable %s is undefined" t (show n)
+  show (UnknownName n) = printf "unknown name %s" (show n)
   show (WrongType n x y) = printf "%s variable %s is not a %s" x (show n) y
+  show (UnknownArg n a) = printf "unknown argument %s given to %s" (show a) (show n)
+  show (TooManyArgs n) = printf "too many arguments given to %s" (show n)
+  show (ArgMissing n x) = printf "%s arg missing for %s" (show x) (show n)
+  show (Mismatch n x) = printf "%s mismatch in %n" x (show n)
+  show (Missing n x) = printf "%s was not given any %s" (show n) x
 
-type Contextual a o m = (Applicative m, MonadState (Context a o) m, MonadError ContextError m)
+type Contextual a o m = (Applicative m, MonadState (Context a o) m, MonadError CompileError m)
 type Evalable a o m = (Eq a, Eq o, Contextual a o m)
 
 emptyContext :: [a] -> [o] -> Context a o
@@ -581,6 +607,7 @@ data CodeFragment v oa oo a o
   | ForN Name (Range Var Int) [CodeFragment v oa oo a o]
   | LetN Name SimpleExpr
   | If (Statement v oa oo a o) [CodeFragment v oa oo a o]
+  | IfElse (Statement v oa oo a o) [CodeFragment v oa oo a o] [CodeFragment v oa oo a o]
   | EarlyReturn (Maybe (Var a))
   | Pass
 
@@ -594,6 +621,7 @@ instance
   ForN a b c == ForN x y z = (a == x) && (b == y) && (c == z)
   LetN x y == LetN a b = (x == a) && (y == b)
   If x y == If a b = (x == a) && (y == b)
+  IfElse x y z == IfElse a b c = (x == a) && (y == b) && (z == c)
   EarlyReturn x == EarlyReturn y = x == y
   Pass == Pass = True
   _ == _ = False
@@ -617,6 +645,11 @@ instance
   blockLines (If s xs) =
     [ (0, T.pack $ printf "if %s" $ show s) ] <>
     increaseIndent (concatMap blockLines xs)
+  blockLines (IfElse s xs ys) =
+    [ (0, T.pack $ printf "if %s" $ show s) ] <>
+    increaseIndent (concatMap blockLines xs) <>
+    [ (0, "else") ] <>
+    increaseIndent (concatMap blockLines ys)
   blockLines (EarlyReturn Nothing) = [(0, "return")]
   blockLines (EarlyReturn (Just x)) = [(0, T.pack $ printf "return %s" (show x))]
   blockLines (Pass) = [(0, "pass")]
@@ -646,16 +679,20 @@ codeFragmentParser rvo rvi a o = pFrag where
         <|> try fForN
         <|> try fLetN
         <|> try fIf
+        <|> try fIfElse
         <|> try fReturn
         <|> try fPass
   fLetN = LetN <$> (keyword "let" *> varname <* symbol "=") <*> parser
   fIf = If <$> (keyword "if" *> statementParser rvo rvi) <*> fBlock
+  fIfElse = IfElse <$> (keyword "if" *> statementParser rvo rvi) <*> bElse <*> fBlock
   fForMe = ForMe <$> (keyword "for" *> keyword "action" *> varname) <*>
     (keyword "in" *> rangeParser parser (varParser a)) <*> fBlock
   fForThem = ForThem <$> (keyword "for" *> keyword "outcome" *> varname) <*>
     (keyword "in" *> rangeParser parser (varParser o)) <*> fBlock
   fForN = ForN <$> (keyword "for" *> keyword "number" *> varname) <*>
     (keyword "in" *> boundedRange) <*> fBlock
+  bElse = try (keyword "else" $> [])
+        <|> ((:) <$> codeFragmentParser rvo rvi a o <*> bElse)
   fBlock =   try (keyword "end" $> [])
          <|> ((:) <$> codeFragmentParser rvo rvi a o <*> fBlock)
   fPass = symbol "pass" $> Pass
@@ -671,12 +708,15 @@ evalCodeFragment handleVar code = case code of
   ForThem n r inner -> loop (withO n) inner =<< elemsInContext getOs getO r
   ForN n r inner -> loop (withN n) inner =<< elemsInContext (return [0..]) getN r
   LetN n x -> evalExpr x >>= modify . withN n >> return id
-  If s block -> do
+  If s block -> evalCodeFragment handleVar (IfElse s block [Pass])
+  IfElse s tblock eblock -> do
     cond <- evalStatement handleVar s
-    thens <- mapM (evalCodeFragment handleVar) block
+    thens <- mapM (evalCodeFragment handleVar) tblock
+    elses <- mapM (evalCodeFragment handleVar) eblock
     let yes = foldr1 (.) thens
+    let no = foldr1 (.) elses
     return (\continue act ->
-      (cond %^ yes continue act) %| (L.Neg cond %^ continue act))
+      (cond %^ yes continue act) %| (L.Neg cond %^ no continue act))
   EarlyReturn x -> const <$> evalCode handleVar (Return x)
   Pass -> return id
   where loop update block xs
@@ -741,10 +781,10 @@ evalCode o2i (Return Nothing) = defaultAction >>= evalCode o2i . Return . Just .
 evalCode _ (Return (Just v)) = (L.Val .) . (==) <$> getA v
 
 codeToProgram :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  HandleVar v oa oo a o (StateT (Context a o) (ExceptT ContextError Identity)) ->
+  HandleVar v oa oo a o (StateT (Context a o) (ExceptT CompileError Identity)) ->
   Context a o ->
   Code v oa oo a o ->
-  Either ContextError (AgentMap v a o)
+  Either CompileError (AgentMap v a o)
 codeToProgram handleVar context code = runExcept $ do
   (prog, state) <- runStateT (evalCode handleVar code) context
   return $ Map.fromList [(a, prog a) | a <- actionList state]
@@ -763,7 +803,7 @@ modalizedCodeParser :: (Ord a, Ord o, AgentVar v) =>
 modalizedCodeParser a o = codeParser trivialParser (vParser a o) a o
 
 modalizedCodeToProgram :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  Context a o -> ModalizedCode v a o -> Either ContextError (AgentMap v a o)
+  Context a o -> ModalizedCode v a o -> Either CompileError (AgentMap v a o)
 modalizedCodeToProgram = codeToProgram voidToFormula
 
 -------------------------------------------------------------------------------
@@ -781,19 +821,19 @@ unrestrictedCodeParser ::
 unrestrictedCodeParser p = codeParser p p
 
 unrestrictedCodeToProgram :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  Context a o -> UnrestrictedCode v a o -> Either ContextError (AgentMap v a o)
+  Context a o -> UnrestrictedCode v a o -> Either CompileError (AgentMap v a o)
 unrestrictedCodeToProgram = codeToProgram evalVar
 
 -------------------------------------------------------------------------------
 
+type AgentMap v a o = Map a (ModalFormula (v a o))
+
 data Def v oa oo a o = Def
-  { agentDefaults :: Map Name (Val a o)
+  { agentArgs :: [(Name, Maybe (Val a o))]
   , agentActions :: Maybe [a]
   , agentOutcomes :: Maybe [o]
   , agentName :: Name
   , agentCode :: Code v oa oo a o }
-
-type AgentMap v a o = Map a (ModalFormula (v a o))
 
 instance
   ( Eq (v (Relation (Var oa)) (Relation (Var oo)))
@@ -808,18 +848,16 @@ instance
   , Show (v (Relation (Var a)) (Relation (Var o)))
   , Show a, Show o
   ) => Blockable (Def v oa oo a o) where
-  blockLines (Def ps oa oo n c) =
-    (0, header) : increaseIndent (blockLines c) where
-      header = T.pack $ printf "def %s%s%s%s" (T.unpack n) x y z
-      x, y, z :: String
-      x = if Map.null ps
-        then ""
-        else printf "(%s)" $ List.intercalate ("," :: String) $ map showP $ Map.toList ps
-      showP (var, Number i) = printf "number %s=%d" (T.unpack var) i
-      showP (var, Action a) = printf "action %s=%s" (T.unpack var) (show a)
-      showP (var, Outcome o) = printf "outcome %s=%s" (T.unpack var) (show o)
-      y = maybe "" (printf "actions=[%s]" . List.intercalate "," . map show) oa
-      z = maybe "" (printf "outcomes=[%s]" . List.intercalate "," . map show) oo
+  blockLines (Def ps oa oo n c) = (0, header) : increaseIndent (blockLines c) where
+    header = T.pack $ printf "def %s%s%s%s" (T.unpack n) x y z
+    x = if null ps then "" else printf "(%s)" $ List.intercalate ("," :: String) $ map showP ps
+    showP (var, Nothing) = printf "number %s" (T.unpack var)
+    showP (var, Just (Number i)) = printf "number %s=%d" (T.unpack var) i
+    showP (var, Just (Action a)) = printf "action %s=%s" (T.unpack var) (show a)
+    showP (var, Just (Outcome o)) = printf "outcome %s=%s" (T.unpack var) (show o)
+    y = maybe "" (printf "actions=[%s]" . List.intercalate "," . map show) oa
+    z = maybe "" (printf "outcomes=[%s]" . List.intercalate "," . map show) oo
+    x, y, z :: String
 
 instance
   ( Show (v (Relation (Var oa)) (Relation (Var oo)))
@@ -836,41 +874,109 @@ defParser ::
   Parsec Text s (Def v oa oo a o)
 defParser rvo rvi a o kwa kwo kw = makeDef <$>
   (keyword kw *> name) <*>
-  option Map.empty (try $ argsParser a o) <*>
-  orderParser kwa a <*>
-  orderParser kwo o <*>
+  option [] (try $ defargsParser a o) <*>
+  deforderParser kwa a <*>
+  deforderParser kwo o <*>
   codeParser rvo rvi a o
   where makeDef n ps as os = Def ps as os n
 
-compile :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  HandleVar v oa oo a o (StateT (Context a o) (ExceptT ContextError Identity)) ->
-  Context a o -> Def v oa oo a o ->
-  Either ContextError (Name, AgentMap v a o)
-compile o2i x agent = (agentName agent,) . Map.map L.simplify <$> getProgram where
-  getProgram = codeToProgram o2i context (agentCode agent)
-  context = x{
-    variables=Map.union (variables x) (agentDefaults agent),
-    actionList=fromMaybe (actionList x) (agentActions agent),
-    outcomeList=fromMaybe (outcomeList x) (agentOutcomes agent) }
-
-argsParser :: Parsec Text s a -> Parsec Text s o -> Parsec Text s (Map Name (Val a o))
-argsParser a o = Map.fromList <$> parens (arg `sepBy` comma) where
+defargsParser :: Parsec Text s a -> Parsec Text s o -> Parsec Text s [(Name, Maybe (Val a o))]
+defargsParser a o = parens (arg `sepBy` comma) where
   arg = try num <|> try act <|> try out
-  num = keyword "number" *> ((,) <$> name <*> (symbol "=" *> (Number <$> parser)))
-  act = keyword "actions" *> ((,) <$> name <*> (symbol "=" *> (Action <$> a)))
-  out = keyword "outcomes" *> ((,) <$> name <*> (symbol "=" *> (Outcome <$> o)))
+  num = keyword "number" *> ((,) <$> name <*> optional (symbol "=" *> (Number <$> parser)))
+  act = keyword "actions" *> ((,) <$> name <*> optional (symbol "=" *> (Action <$> a)))
+  out = keyword "outcomes" *> ((,) <$> name <*> optional (symbol "=" *> (Outcome <$> o)))
 
-orderParser :: String -> Parsec Text s a -> Parsec Text s (Maybe [a])
-orderParser kw p = try acts <|> try dunno <|> pure Nothing where
+deforderParser :: String -> Parsec Text s a -> Parsec Text s (Maybe [a])
+deforderParser kw p = try acts <|> try dunno <|> pure Nothing where
   acts = Just <$> (keyword kw *> symbol "=" *> brackets (p `sepEndBy` comma))
   dunno = brackets (string "...") $> Nothing
+
+compile :: (Eq a, Ord a, Eq o, AgentVar v) =>
+  HandleVar v oa oo a o (StateT (Context a o) (ExceptT CompileError Identity)) ->
+  Parameters a o -> Def v oa oo a o ->
+  Either CompileError (Name, AgentMap v a o)
+compile handleVar params def = do
+  context <- makeContext params def
+  program <- codeToProgram handleVar context (agentCode def)
+  return (agentName def, Map.map L.simplify program)
+
+-------------------------------------------------------------------------------
+
+data Parameters a o = Parameters
+  { paramArgs :: [Val a o]
+  , paramKwargs :: Map Name (Val a o)
+  , paramActions :: Maybe [a]
+  , paramOutcomes :: Maybe [o]
+  } deriving (Eq, Ord, Show)
+
+instance (Parsable a, Parsable o) => Parsable (Parameters a o) where
+  parser = paramsParser parser parser
+
+noParameters :: Parameters a o
+noParameters = Parameters [] Map.empty Nothing Nothing
+
+paramsParser ::
+  Parsec Text s a -> Parsec Text s o ->
+  Parsec Text s (Parameters a o)
+paramsParser a o = do
+  (args, kwargs) <- argsParser a o
+  as <- option Nothing (orderParser a)
+  os <- option Nothing (orderParser o)
+  return $ Parameters args kwargs as os
+
+argsParser ::
+  Parsec Text s a -> Parsec Text s o ->
+  Parsec Text s ([Val a o], Map Name (Val a o))
+argsParser a o = parens argsThenKwargs where
+  argsThenKwargs = (,) <$> allArgs <*> allKwargs
+  allArgs = arg `sepEndBy` comma
+  allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
+  kwarg = (,) <$> name <*> (symbol "=" *> arg)
+  arg = try num <|> try act <|> try out <?> "an argument (starting with one of #@$)"
+  num = Number <$> parser
+  act = Action <$> a
+  out = Outcome <$> o
+
+orderParser :: Parsec Text s x -> Parsec Text s (Maybe [x])
+orderParser x = try (Just <$> listParser x) <|> (brackets (string "...") $> Nothing)
+
+makeContext :: (Eq a, Eq o) =>
+  Parameters a o -> Def v oa oo a o -> Either CompileError (Context a o)
+makeContext params def = Context <$> vs <*> as <*> os where
+  aname = agentName def
+  joinArgs argname Nothing Nothing  = return (argname, Nothing)
+  joinArgs argname (Just x) Nothing = return (argname, Just x)
+  joinArgs argname Nothing (Just y) = return (argname, Just y)
+  joinArgs argname (Just x) (Just y)
+    | typesMatch x y = return (argname, Just x)
+    | otherwise = Left (WrongType argname (typeOf x) (typeOf y))
+  joinKwargs argname Nothing Nothing  = Left (ArgMissing aname argname)
+  joinKwargs argname (Just x) Nothing = return (argname, x)
+  joinKwargs argname Nothing (Just y) = return (argname, y)
+  joinKwargs argname (Just x) (Just y)
+    | typesMatch x y = return (argname, x)
+    | otherwise = Left (WrongType argname (typeOf x) (typeOf y))
+  vs = do
+    when (length (paramArgs params) > length (agentArgs def)) (Left $ TooManyArgs aname)
+    let padded = (Just <$> paramArgs params) ++ repeat Nothing
+    arglist <- mapM (\((n, d), v) -> joinArgs n v d) (zip (agentArgs def) padded)
+    argmap <- mapM (\(k, v) -> joinKwargs k (Map.lookup k $ paramKwargs params) v) arglist
+    return $ Map.fromList argmap
+  getMatching str f g = case (f params, g def) of
+    (Nothing, Nothing) -> Left $ Missing aname str
+    (Just xs, Nothing) -> return xs
+    (Nothing, Just xs) -> return xs
+    (Just xs, Just ys) -> if xs == ys then return xs else Left (Mismatch aname str)
+  as = getMatching "actions" paramActions agentActions
+  os = getMatching "outcomes" paramOutcomes agentOutcomes
 
 -------------------------------------------------------------------------------
 
 type ModalizedDef v a o = Def v Void Void a o
 
 makeModalizedDef :: Name -> ModalizedCode v a o -> ModalizedDef v a o
-makeModalizedDef = Def Map.empty Nothing Nothing
+makeModalizedDef = Def [] Nothing Nothing
 
 modalizedDefParser :: (Ord a, Ord o, AgentVar v) =>
   Parsec Text s a -> Parsec Text s o -> String -> String -> String ->
@@ -878,7 +984,7 @@ modalizedDefParser :: (Ord a, Ord o, AgentVar v) =>
 modalizedDefParser a o = defParser trivialParser (vParser a o) a o
 
 compileModalizedAgent :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  Context a o -> ModalizedDef v a o -> Either ContextError (Name, AgentMap v a o)
+  Parameters a o -> ModalizedDef v a o -> Either CompileError (Name, AgentMap v a o)
 compileModalizedAgent = compile voidToFormula
 
 -------------------------------------------------------------------------------
@@ -886,7 +992,7 @@ compileModalizedAgent = compile voidToFormula
 type UnrestrictedDef v a o = Def v a o a o
 
 makeUnrestrictedDef :: Name -> UnrestrictedCode v a o -> UnrestrictedDef v a o
-makeUnrestrictedDef = Def Map.empty Nothing Nothing
+makeUnrestrictedDef = Def [] Nothing Nothing
 
 unrestrictedDefParser :: (Ord a, Ord o, AgentVar v) =>
   Parsec Text s a -> Parsec Text s o -> String -> String -> String ->
@@ -894,5 +1000,5 @@ unrestrictedDefParser :: (Ord a, Ord o, AgentVar v) =>
 unrestrictedDefParser a o = defParser (vParser a o) (vParser a o) a o
 
 compileUnrestrictedAgent :: (Eq a, Ord a, Eq o, AgentVar v) =>
-  Context a o -> UnrestrictedDef v a o -> Either ContextError (Name, AgentMap v a o)
+  Parameters a o -> UnrestrictedDef v a o -> Either CompileError (Name, AgentMap v a o)
 compileUnrestrictedAgent = compile evalVar
