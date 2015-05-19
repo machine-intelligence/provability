@@ -1,5 +1,3 @@
-Something is broken in Games.hs! (Compare this branch to master.)
-
 Eventually, I'd like to be able to write and run files like the following:
 
     agent UDT(number start=0, number step=0)
@@ -19,7 +17,7 @@ Eventually, I'd like to be able to write and run files like the following:
 
     ------------------------------------------
 
-    universe Newcomb(number level=0) outcomes=[1001000, 1000000, 1000, 0]
+    universe Newcomb(number level=0) actions=[1, 2] outcomes=[1001000, 1000000, 1000, 0]
       if A()=2 and [$level]⌜A()=1⌝
          return 1001000
       if A()=1 and [$level]⌜A()=1⌝
@@ -28,19 +26,19 @@ Eventually, I'd like to be able to write and run files like the following:
          return 1000
       return 0
 
-    play Newcomb(10) UDT(0, 1)[1, 2]
+    play Newcomb(10) UDT(0, 1)
 
     ------------------------------------------
 
-    universemap Agame($level) [Good, Bad]
+    universemap Agame($level) actions=[A, B] outcomes=[Good, Bad]
       Good ↔ [$level]⌜A()=A⌝
       Bad ↔ ¬[$level]⌜A()=A⌝
-    universemap Bgame($level) [Good, Bad]
+    universemap Bgame($level) actions=[A, B] outcomes=[Good, Bad]
       Good ↔ [$level]⌜A()=B⌝
       Bad ↔ ¬[$level]⌜A()=B⌝
 
-    play Agame UDT(step=1)[A, B]
-    play Bgame UDT(step=1)[A, B]
+    play Agame UDT(step=1)
+    play Bgame UDT(step=1)
 
     ------------------------------------------
 
@@ -55,7 +53,7 @@ Eventually, I'd like to be able to write and run files like the following:
 
     -- OR --
 
-    universeNmap 2 PD
+    umapN 2 PD
       DC ↔ A1()=D and A2()=C
       CC ↔ A1()=C and A2()=C
       DD ↔ A1()=D and A2()=D
@@ -66,17 +64,20 @@ Eventually, I'd like to be able to write and run files like the following:
       UDT(step=1)[C, D][DC, CC, DD, CD]
       UDT(step=1)[C, D][CD, CC, DD, DC]
 
-It's going to take a little while to get there from here, but here's my
-roadmap:
+Here's my roadmap to get there from here:
 
-1. Generalize the relVar parser so that it can handle more than just "Me" and
-   "Them". Figure out how to pass those parameters around. Expose those
-   parameters all the way up through the agentParsers.
-2. Generalize Statement, CodeFragment, Code, and Agent in some way that allows
-   them to use other variable types besides just ModalVars. This is necessary
-   if we want to be able to define Universes which refer to many agents (rather
-   than assuming that everybody refers to exactly one opponent.)
-3. Overhaul the code in Universes.hs such that it can parse the above syntax.
-4. Remove GameTools.hs, which will be obsoleted by step 3.
-5. Starting from ModalCombat.hs, write a tool that reads and executes files
-   written in the above format.
+1. Write a parser for the above. I began one in Universe.hs, but it's still
+   pretty limited.
+2. Write a command line tool that reads and executes these files.
+   ModalCombat.hs is an example of how to do this.
+
+Other things on the todo list:
+
+3. Once the above tools exist, revisit Games.hs and GameTools.hs. They will be
+   duplicating functionality, and likely should be obsoleted -- although
+   perhaps we'll want to improve the tools for building & running games in
+   Haskell (rather than just via the parser) before we do so.
+4. Document everything better.
+5. Add tests. Right now, my idiot checks are as follows: run "main" in
+   "Games.hs", and run "modalcombat" on "agents/standard.cd". More tests would
+   be nice though.

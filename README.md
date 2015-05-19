@@ -23,10 +23,6 @@ files such as `agents/standard.cd`. This is basically the
 shared-source-code-prisoner's-dilemma-specific parser code (built on top of the
 generic-modal-agent parser code of `Modal/Code.hs`).
 
-`Modal/Agent.hs`: The data type and parsers for modal code all packaged up into
-a single modal agent. I split it off of `Code.hs` because that file was getting
-too large, but it should perhaps be merged back in there at some point.
-
 `Modal/Environment.hs`: Defines environments full of modal agents. This is the
 structure that allows us to track which modal agents refer to other modal
 agents, and ensure that modal agents are well-founded (e.g. that they don't go
