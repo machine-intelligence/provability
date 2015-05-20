@@ -12,9 +12,9 @@ import Modal.Formulas (ModalFormula)
 import Modal.Statement
 import Modal.Utilities
 import Text.Printf (printf)
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 
 --------------------------------------------------------------------------------
 -- The environment type. It holds all of the agents on a given side of combat.
@@ -27,7 +27,7 @@ type AgentMap v a o = Map a (ModalFormula (v a o))
 newtype Env v a o = Env { _participants :: Map Name (AgentMap v a o, Int) }
 
 instance Show a => Show (Env v a o) where
-	show (Env ps) = printf "{%s}" (Text.unpack $ Text.intercalate ", " $ Map.keys ps)
+	show (Env ps) = printf "{%s}" (List.intercalate ", " $ Map.keys ps)
 
 nobody :: Env v a o
 nobody = Env Map.empty
@@ -62,10 +62,10 @@ data EnvError
   deriving (Eq, Ord, Read)
 
 instance Show EnvError where
-  show (UnknownPlayer n) = printf "Player %s not found in the environment." $ Text.unpack n
-  show (NameCollision n) = printf "%s is already in the environment!" $ Text.unpack n
-  show (MissingSubagents n ns) = printf "Unknown agents referenced by %s: %s"
-    (Text.unpack n) (Text.unpack $ Text.intercalate ", " $ Set.toList ns)
+  show (UnknownPlayer n) = printf "Player %s not found in the environment." n
+  show (NameCollision n) = printf "%s is already in the environment!" n
+  show (MissingSubagents n ns) = printf "Unknown agents referenced by %s: %s" n
+    (List.intercalate ", " $ Set.toList ns)
 
 -------------------------------------------------------------------------------
 -- Functions that insert agents into environments.

@@ -27,7 +27,6 @@ import Text.Printf (printf)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
@@ -136,7 +135,7 @@ defaultAction = head <$> getAs
 data Ref a = Ref Name | Lit a deriving (Eq, Ord, Read)
 
 instance Show a => Show (Ref a) where
-  show (Ref n) = '#' : Text.unpack n
+  show (Ref n) = '#' : n
   show (Lit x) = show x
 
 instance Parsable a => Parsable (Ref a) where

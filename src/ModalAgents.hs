@@ -1,12 +1,9 @@
 module Main where
 import Prelude hiding (foldr)
 import Data.Monoid
-import Data.Foldable
 import Options.Applicative
 import System.Environment (getProgName)
 import Modal.Universes
-import Modal.Environment
-import Modal.Utilities
 
 programDescription :: String
 programDescription =

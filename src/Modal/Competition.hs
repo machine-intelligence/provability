@@ -6,7 +6,6 @@ module Modal.Competition where
 import Control.Applicative
 import Control.Arrow ((***))
 import Data.Map (Map)
-import Data.Set (Set)
 import Data.Maybe (fromMaybe)
 import Modal.Statement
 import Modal.Environment
@@ -16,7 +15,6 @@ import Text.Printf (printf)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 
 extractPMEEkey :: (k -> Bool) -> Map k Bool -> k
 extractPMEEkey p = extract . Map.keys . Map.filterWithKey matchKey where
@@ -35,8 +33,8 @@ data VsVar a o
   | Vs2 Name Name o
   deriving (Eq, Ord)
 instance (Show a, Show o) => Show (VsVar a o) where
-  show (Vs1 n1 n2 a) = printf "%s(%s)=%s" (Text.unpack n1) (Text.unpack n2) (show a)
-  show (Vs2 n1 n2 o) = printf "%s(%s)=%s" (Text.unpack n1) (Text.unpack n2) (show o)
+  show (Vs1 n1 n2 a) = printf "%s(%s)=%s" n1 n2 (show a)
+  show (Vs2 n1 n2 o) = printf "%s(%s)=%s" n1 n2 (show o)
 
 is1 :: Name -> Name -> VsVar a o -> Bool
 is1 n m (Vs1 x y _) = x == n && y == m
@@ -115,8 +113,8 @@ data MultiVsVar u a
 -- TODO: This willbe under-informitave if we start allowing programs that
 -- reference other programs.
 instance (Show u, Show a) => Show (MultiVsVar u a) where
-  show (UniversePlays ns x) = printf "%s=%s" (Text.unpack $ head ns) (show x)
-  show (PlayerNPlays ns i x) = printf "%s=%s" (Text.unpack (ns !! i)) (show x)
+  show (UniversePlays ns x) = printf "%s=%s" (head ns) (show x)
+  show (PlayerNPlays ns i x) = printf "%s=%s" (ns !! i) (show x)
 
 isEntryFor :: [Name] -> Int -> MultiVsVar u a -> Bool
 isEntryFor ns 0 (UniversePlays xs _) = xs == ns

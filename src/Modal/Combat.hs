@@ -24,7 +24,6 @@ import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 
 -------------------------------------------------------------------------------
 -- The type of actions.
@@ -44,7 +43,7 @@ data MeVsThem a o = MeVsThemIs a | ThemVsMeIs o | ThemVsOtherIs Name o deriving 
 instance (Show a, Show o) => Show (MeVsThem a o) where
   show (MeVsThemIs a) = "Me(Them)=" ++ show a
   show (ThemVsMeIs o) = "Them(Me)=" ++ show o
-  show (ThemVsOtherIs n o) = "Them(" ++ Text.unpack n ++ ")=" ++ show o
+  show (ThemVsOtherIs n o) = "Them(" ++ n ++ ")=" ++ show o
 
 instance Bifunctor MeVsThem where
   bimap f g = runIdentity . bitraverse (Identity . f) (Identity . g)
@@ -96,7 +95,7 @@ instance Read RawVar where
         else ("", [])
     from "a" = MeVsThem
     from "b" = ThemVsMe
-    from o = ThemVs $ Text.pack o
+    from o = ThemVs o
 
 rawToMV :: RawVar -> MeVsThem CD CD
 rawToMV MeVsThem = MeVsThemIs C
@@ -125,9 +124,9 @@ data GameObject a
 
 instance Show a => Show (GameObject a) where
   show (Player a) = show a
-  show (Raw n f) = printf "raw %s %s" (Text.unpack n) (show f)
-  show (Play n1 n2) = printf "play %s %s" (Text.unpack n1) (Text.unpack n2)
-  show (Describe n1 n2) = printf "describe %s %s" (Text.unpack n1) (Text.unpack n2)
+  show (Raw n f) = printf "raw %s %s" n (show f)
+  show (Play n1 n2) = printf "play %s %s" n1 n2
+  show (Describe n1 n2) = printf "describe %s %s" n1 n2
 
 newtype Game a = Game { objects :: [GameObject a] }
   deriving (Eq, Show, Functor)
@@ -174,17 +173,17 @@ toCformula m = m >>= cify where
 
 doAction :: Env MeVsThem CD CD-> GameObject (Name, ModalAgent) -> IO ()
 doAction env (Play n1 n2) = do
-  void $ printf "%s vs %s:\n" (Text.unpack n1) (Text.unpack n2)
+  void $ printf "%s vs %s:\n" n1 n2
   (r1, r2) <- run (compete env n1 n2)
-  void $ printf "  %s=%s, %s=%s\n\n" (Text.unpack n1) (show r1) (Text.unpack n2) (show r2)
+  void $ printf "  %s=%s, %s=%s\n\n" n1 (show r1) n2 (show r2)
 doAction env (Describe n1 n2) = do
-  void $ printf "%s vs %s:\n\n" (Text.unpack n1) (Text.unpack n2)
+  void $ printf "%s vs %s:\n\n" n1 n2
   fullCmap <- run (competitionMap env n1 n2)
   let cmap = Map.filterWithKey (const . varIsC) (Map.map toCformula fullCmap)
   displayTable $ indentTable "  " $ tuplesToTable $ Map.toAscList cmap
   displayTable $ indentTable "  " $ kripkeTable cmap
   (r1, r2) <- run (compete env n1 n2)
-  printf "  Result: %s=%s, %s=%s\n\n" (Text.unpack n1) (show r1) (Text.unpack n2) (show r2)
+  printf "  Result: %s=%s, %s=%s\n\n" n1 (show r1) n2 (show r2)
 doAction _ _ = return ()
 
 playGame :: Game (Name, ModalAgent) -> Env MeVsThem CD CD -> IO ()

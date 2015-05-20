@@ -6,7 +6,6 @@ import Data.Char
 import Data.Functor.Identity
 import Data.Set (Set)
 import qualified Data.Set as Set
-import qualified Data.Text as Text
 import Data.Text (Text)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many)
@@ -46,7 +45,7 @@ w1 :: Parsec Text s ()
 w1 = try (void $ many1 $ satisfy isSpace) <|> eof
 
 identifier :: Parsec Text s Char -> Parsec Text s Char -> Parsec Text s Name
-identifier h t = Text.pack <$> ((:) <$> h <*> many t)
+identifier h t = ((:) <$> h <*> many t)
 
 parens :: Parsec Text s a -> Parsec Text s a
 parens = between (symbol "(") (symbol ")")
@@ -63,8 +62,8 @@ braces = between (symbol "{") (symbol "}")
 name :: Parsec Text s Name
 name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
 
-text :: Parsec Text s Name
-text = identifier (satisfy isNameChar) (satisfy isNameChar)
+anyname :: Parsec Text s Name
+anyname = identifier (satisfy isNameChar) (satisfy isNameChar)
 
 isNameFirstChar, isNameChar :: Char -> Bool
 isNameFirstChar = (||) <$> isLetter <*> (`elem` "-_'")

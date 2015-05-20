@@ -39,7 +39,7 @@ x $> y = x *> pure y
 (<$$>) :: Functor f => f a -> (a -> b) -> f b
 (<$$>) = flip (<$>)
 
-type Name = Text
+type Name = String
 
 data Void
 instance Eq Void

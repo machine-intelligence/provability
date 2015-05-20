@@ -25,20 +25,20 @@ import qualified Data.Map as Map
 import qualified Data.Text as Text
 import qualified Modal.Parser as P
 
-newtype A = A Text deriving (Eq, Ord)
-instance Show A where show (A a) = '@' : Text.unpack a
-instance Parsable A where parser = char '@' *> P.text <$$> A
+newtype A = A String deriving (Eq, Ord)
+instance Show A where show (A a) = '@' : a
+instance Parsable A where parser = char '@' *> P.anyname <$$> A
 instance Read A where
-  readsPrec _ ('@':xs) = [(A $ Text.pack n, rest) | not $ null n] where
-    (n, rest) = (takeWhile P.isNameChar xs, dropWhile P.isNameChar xs)
+  readsPrec _ ('@':xs) = [(A x, rest) | not $ null x] where
+    (x, rest) = (takeWhile P.isNameChar xs, dropWhile P.isNameChar xs)
   readsPrec _ _ = []
 
-newtype U = U Text deriving (Eq, Ord)
-instance Show U where show (U u) = '$' : Text.unpack u
-instance Parsable U where parser = char '$' *> P.text <$$> U
+newtype U = U String deriving (Eq, Ord)
+instance Show U where show (U u) = '$' : u
+instance Parsable U where parser = char '$' *> P.anyname <$$> U
 instance Read U where
-  readsPrec _ ('$':xs) = [(U $ Text.pack n, rest) | not $ null n] where
-    (n, rest) = (takeWhile P.isNameChar xs, dropWhile P.isNameChar xs)
+  readsPrec _ ('$':xs) = [(U x, rest) | not $ null x] where
+    (x, rest) = (takeWhile P.isNameChar xs, dropWhile P.isNameChar xs)
   readsPrec _ _ = []
 
 data BiVar m t = Me m | Them t deriving (Eq, Ord)
@@ -129,12 +129,12 @@ data Call x y = Call
   } deriving (Eq, Ord, Show)
 
 callSign :: (Show x, Show y) => Call x y -> Name
-callSign call = fromMaybe (Text.pack $ callHeader call) (callAlias call)
+callSign call = fromMaybe (callHeader call) (callAlias call)
 
 -- TODO: This text thing is ridiculous.
 -- Either stop using printf or redefine Name to be String.
 callHeader :: (Show x, Show y) => Call x y -> String
-callHeader (Call name params _) = (Text.unpack name) ++ (show params)
+callHeader (Call name params _) = name ++ (show params)
 
 instance (Parsable x, Parsable y) => Parsable (Call x y) where
   parser = Call <$> P.name <*> paramsParser parser parser <*> alias where
@@ -237,9 +237,9 @@ showHeader ucall acalls = void $ printf "%s, %s:\n" un ans where
 
 showResults :: (Name, CompiledAgent UStatement) -> [(Name, CompiledAgent AStatement)] -> IO ()
 showResults upair apairs = void $ printf "%s=%s, %s\n\n" un (show u) alist where
-  un = Text.unpack (fst upair) :: String
+  un = fst upair
   (u, as) = simpleMultiCompete upair apairs
-  showA n a = printf "%s=%s" (Text.unpack n :: String) (show a) :: String
+  showA n a = printf "%s=%s" n (show a) :: String
   alist = List.intercalate (", " :: String) (zipWith showA (map fst apairs) as)
 
 doAction :: Agents -> Universes -> GameObject -> IO ()
@@ -263,9 +263,9 @@ playGame objects = do
   let agentDefs = agentList objects
   let universeDefs = universeList objects
   putStr "Universes loaded: "
-  void $ printf "{ %s }\n" $ List.intercalate ", " (map (Text.unpack . defName) universeDefs)
+  void $ printf "{ %s }\n" $ List.intercalate ", " (map defName universeDefs)
   putStr "Agents loaded: "
-  void $ printf "{ %s }\n" $ List.intercalate ", " (map (Text.unpack . defName) agentDefs)
+  void $ printf "{ %s }\n" $ List.intercalate ", " (map defName agentDefs)
   putStrLn ""
   let agents = Map.fromList [(defName a, a) | a <- agentDefs]
   let universes = Map.fromList [(defName u, u) | u <- universeDefs]

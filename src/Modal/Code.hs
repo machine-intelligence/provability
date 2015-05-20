@@ -1,6 +1,5 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Modal.Code where
@@ -136,16 +135,16 @@ data CodeFragment s
 
 instance (Show s, Show (Act s), Show (Out s)) => Blockable (CodeFragment s) where
   blockLines (ForMe n r cs) =
-    [(0, Text.pack $ printf "for action %s in %s" (Text.unpack n) (show r))] <>
+    [(0, Text.pack $ printf "for action %s in %s" n (show r))] <>
     increaseIndent (concatMap blockLines cs)
   blockLines (ForThem n r cs) =
-    [(0, Text.pack $ printf "for outcome %s in %s" (Text.unpack n) (show r))] <>
+    [(0, Text.pack $ printf "for outcome %s in %s" n (show r))] <>
     increaseIndent (concatMap blockLines cs)
   blockLines (ForN n r cs) =
-    [(0, Text.pack $ printf "for number %s in %s" (Text.unpack n) (show r))] <>
+    [(0, Text.pack $ printf "for number %s in %s" n (show r))] <>
     increaseIndent (concatMap blockLines cs)
   blockLines (LetN n x) =
-    [(0, Text.pack $ printf "let %s = %s" (Text.unpack n) (show x))]
+    [(0, Text.pack $ printf "let %s = %s" n (show x))]
   blockLines (If s xs) =
     [ (0, Text.pack $ printf "if %s" $ show s) ] <>
     increaseIndent (concatMap blockLines xs)
@@ -288,16 +287,15 @@ data Def s = Def
 
 instance (Show s, Show (Act s), Show (Out s)) => Blockable (Def s) where
   blockLines (Def ps oa oo n c) = (0, header) : increaseIndent (blockLines c) ++ end where
-    header = Text.pack $ printf "def %s%s%s%s" (Text.unpack n) x y z
-    x = if null ps then ""
-        else printf "(%s)" $ List.intercalate ("," :: String) $ map showP ps
-    showP (var, Nothing) = printf "number %s" (Text.unpack var)
-    showP (var, Just (Number i)) = printf "number %s=%d" (Text.unpack var) i
-    showP (var, Just (Action a)) = printf "action %s=%s" (Text.unpack var) (show a)
-    showP (var, Just (Outcome o)) = printf "outcome %s=%s" (Text.unpack var) (show o)
+    header = Text.pack $ printf "def %s%s%s%s" n x y z
+    x, y, z :: String
+    x = if null ps then "" else printf "(%s)" $ List.intercalate ("," :: String) $ map showP ps
+    showP (var, Nothing) = printf "number %s" var
+    showP (var, Just (Number i)) = printf "number %s=%d" var i
+    showP (var, Just (Action a)) = printf "action %s=%s" var (show a)
+    showP (var, Just (Outcome o)) = printf "outcome %s=%s" var (show o)
     y = maybe "" (printf "actions=[%s]" . List.intercalate "," . map show) oa
     z = maybe "" (printf "outcomes=[%s]" . List.intercalate "," . map show) oo
-    x, y, z :: String
     end = [(0, "end")]
 
 instance (Show s, Show (Act s), Show (Out s)) => Show (Def s) where
@@ -340,7 +338,7 @@ defordersParser kwa kwo a o = try forwards <|> (flipT <$> try backwards) <|> nei
 
 agentName :: (Show (Act s), Show (Out s), IsStatement s) =>
   Parameters (Act s) (Out s) -> Def s -> Name
-agentName params def = defName def <> Text.pack (show params)
+agentName params def = defName def <> show params
 
 compile :: IsStatement s =>
   Parameters (Act s) (Out s) -> Def s ->
@@ -369,7 +367,7 @@ instance (Show a, Show o) => Show (Parameters a o) where
     argstr = List.intercalate "," (map renderVal args)
     mid = if List.null args || Map.null kwargs then "" else "," :: String
     kwargstr = List.intercalate "," (map (uncurry renderKwarg) $ Map.toAscList kwargs)
-    renderKwarg n v = printf "%s=%s" (Text.unpack n :: String) (renderVal v) :: String
+    renderKwarg n v = printf "%s=%s" n (renderVal v) :: String
 
 simpleParameters :: [a] -> [o] -> Parameters a o
 simpleParameters as os = Parameters [] Map.empty (Just as) (Just os)
