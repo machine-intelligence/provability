@@ -110,7 +110,7 @@ data MultiVsVar u a
   | PlayerNPlays [Name] Int a
   deriving (Eq, Ord)
 
--- TODO: This willbe under-informitave if we start allowing programs that
+-- TODO: This willbe under-informative if we start allowing programs that
 -- reference other programs.
 instance (Show u, Show a) => Show (MultiVsVar u a) where
   show (UniversePlays ns x) = printf "%s=%s" (head ns) (show x)
@@ -158,12 +158,14 @@ multiCompete une pnes = do
   return (u, [let PlayerNPlays _ _ x = extractPMEEkey (isEntryFor names n) fixpt
               in x | n <- [1 .. length pnes]])
 
+-- TODO: Make this be able to return an EnvError, and then throw an EnvError
+-- instead of crashing the program if names are ambiguous.
 simpleMultiCompetition :: (Ord u, Ord a, IsMultiVarU vu , IsMultiVarA va) =>
   (Name, Map u (ModalFormula (vu u a))) ->
   [(Name, Map a (ModalFormula (va a u)))] ->
   (MultiCompetition u a)
 simpleMultiCompetition (uName, uAgent) aPairs
-  | length (List.nub names) < length names = error "Ambiguous names." -- TODO
+  | length (List.nub names) < length names = error "Ambiguous names."
   | otherwise = combineMaps uMap pMaps where
     uMap = Map.fromList $ map createEntry $ Map.toList uAgent where
       createEntry = UniversePlays names *** fmap (promoteU names)

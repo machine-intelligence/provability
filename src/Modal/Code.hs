@@ -218,13 +218,32 @@ evalCodeFragment code = case code of
 
 -------------------------------------------------------------------------------
 
+-- TODO: Figure out what to do with FullMap.
+-- As of now, the "normal" code blocks can't parse a FullMap, which I think is
+-- probably the right choice. This guarantees that parsed Code is always
+-- P.M.E.E. That said, being able to parse a full map is often quite
+-- convenient. I haven't thought a lot about whether normal code and maps
+-- should be able to overlap, so I'm going to keep them separate.
+-- For reference, normal code looks like this:
+--
+--   def Agent
+--      if ⊤
+--          return @X
+--      end
+--      return @Y
+--   end
+--
+-- whereas maps might look like this:
+--
+--   def AgentMap
+--      @X ↔ ⊤
+--      @Y ↔ ⊥
+--   end
+--
+-- Not clear they should interact at all.
 data Code s
   = Fragment (CodeFragment s) (Code s)
   | Return (Maybe (Ref (Act s)))
-  -- TODO: I'm not sure we want this here.
-  -- As of now, parsing Code is always P.M.E.E., but you can also use this to
-  -- make something that's not P.M.E.E. For now, it's available but can't be
-  -- parsed through the normal parser.
   | FullMap (Map (Act s) s)
 
 instance (Show s, Show (Act s), Show (Out s)) => Blockable (Code s) where
@@ -312,7 +331,7 @@ defParser a o kwa kwo kw = do
   c <- codeParser a o
   return $ Def ps as os n c
 
--- TODO: parameterize these keywords.
+-- TODO: parameterize the fixed "number"/"action"/"outcome" magic strings.
 defargsParser ::
   Parsec Text u a -> Parsec Text u o ->
   Parsec Text u [(Name, Maybe (Val a o))]
@@ -338,7 +357,7 @@ defordersParser kwa kwo a o = try forwards <|> (flipT <$> try backwards) <|> nei
 
 agentName :: (Show (Act s), Show (Out s), IsStatement s) =>
   Parameters (Act s) (Out s) -> Def s -> Name
-agentName params def = defName def <> show params
+agentName params def = defName def <> renderParams params
 
 compile :: IsStatement s =>
   Parameters (Act s) (Out s) -> Def s ->
@@ -360,14 +379,15 @@ data Parameters a o = Parameters
 instance (Parsable a, Parsable o) => Parsable (Parameters a o) where
   parser = paramsParser parser parser
 
--- TODO: This is functionally useful, and probably shouldn't be a Show instance.
--- (I don't like it when changing a Show changes functionality elsewhere.)
 instance (Show a, Show o) => Show (Parameters a o) where
-  show (Parameters args kwargs _ _) = printf "(%s%s%s)" argstr mid kwargstr where
-    argstr = List.intercalate "," (map renderVal args)
-    mid = if List.null args || Map.null kwargs then "" else "," :: String
-    kwargstr = List.intercalate "," (map (uncurry renderKwarg) $ Map.toAscList kwargs)
-    renderKwarg n v = printf "%s=%s" n (renderVal v) :: String
+  show = renderParams
+
+renderParams :: (Show a, Show o) => Parameters a o -> String
+renderParams (Parameters args kwargs _ _) = printf "(%s%s%s)" argstr mid kwargstr where
+  argstr = List.intercalate "," (map renderVal args)
+  mid = if List.null args || Map.null kwargs then "" else "," :: String
+  kwargstr = List.intercalate "," (map (uncurry renderKwarg) $ Map.toAscList kwargs)
+  renderKwarg n v = printf "%s=%s" n (renderVal v) :: String
 
 simpleParameters :: [a] -> [o] -> Parameters a o
 simpleParameters as os = Parameters [] Map.empty (Just as) (Just os)

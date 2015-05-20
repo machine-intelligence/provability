@@ -54,7 +54,9 @@ data Context a o = Context
   , outcomeList :: [o]
   } deriving (Eq, Show)
 
--- TODO: Clean this up.
+-- TODO: Factor CompileError out of Statement.hs, this is not where it belongs.
+-- Also, clean up the various types of errors such that they carry more context
+-- (e.g. the name of the agent that had the failure).
 data CompileError
   = UnknownVar Name String
   | WrongType Name String String

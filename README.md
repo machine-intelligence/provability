@@ -9,19 +9,17 @@ The other files are as follows:
 runs on files such as the one found in `agents/standard.cd`. (See that file for
 an example of what sort of syntax is supported.)
 
-`Modal/Code.hs`: The meat of the parser, and contains all the machinery that
-turns modal programs into modal formulas.
-
-`Modal/Universes.hs`: An EXPERIMENTAL AND HIGHLY UNTESTED first pass at
-a format for modal agent files which will allow us to specify general programs
-such as modal UDT in asymmetric games. It might work, but even if it does, it
-will be fairly limited. See `TODO.md` for a roadmap that describes where I was
-planning to go with this file.
-
 `Modal/Combat.hs`: Implements the parser used by `ModalCombat.hs` to parse
 files such as `agents/standard.cd`. This is basically the
 shared-source-code-prisoner's-dilemma-specific parser code (built on top of the
 generic-modal-agent parser code of `Modal/Code.hs`).
+
+`ModalAgents.hs`: is `ModalCombat.hs` but for the `modalagents` executable.
+
+`Modal/Universes.hs`: is `Combat.hs` but for the Modal UDT framework.
+
+`Modal/Code.hs`: The meat of the parser, and contains all the machinery that
+turns modal programs into modal formulas.
 
 `Modal/Environment.hs`: Defines environments full of modal agents. This is the
 structure that allows us to track which modal agents refer to other modal

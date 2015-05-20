@@ -394,7 +394,6 @@ lengthAtLeast 0 _ = True
 lengthAtLeast _ [] = False
 lengthAtLeast n (_:xs) = lengthAtLeast (n-1) xs
 
--- TODO: infinite loop
 fixpointDepth :: (Eq a) => Int -> [a] -> Int
 fixpointDepth n xs = 1 + countSkipped 0 (group xs) where
   countSkipped acc [] = acc

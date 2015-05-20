@@ -131,10 +131,8 @@ data Call x y = Call
 callSign :: (Show x, Show y) => Call x y -> Name
 callSign call = fromMaybe (callHeader call) (callAlias call)
 
--- TODO: This text thing is ridiculous.
--- Either stop using printf or redefine Name to be String.
 callHeader :: (Show x, Show y) => Call x y -> String
-callHeader (Call name params _) = name ++ (show params)
+callHeader (Call name params _) = name ++ renderParams params
 
 instance (Parsable x, Parsable y) => Parsable (Call x y) where
   parser = Call <$> P.name <*> paramsParser parser parser <*> alias where
@@ -147,7 +145,9 @@ data GameObject
   | Describe (Call U A) [Call A U]
   deriving Show
 
--- TODO: This needs refactoring.
+-- TODO: This needs refactoring. It should probably go into Code.hs somehow.
+-- Also, the syntax is quite bad; consider removing the need for a "where" and
+-- for the semicolons.
 universeMapParser :: Parsec Text u (Def UStatement)
 universeMapParser = do
   n <- P.keyword "umap" *> P.name
