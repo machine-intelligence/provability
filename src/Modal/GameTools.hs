@@ -40,13 +40,13 @@ gameMap universe agent = Map.fromList $ us ++ as where
   us = [(U1 u, U1A <$> universe u) | u <- enumerate]
   as = [(U1A a, agent a) | a <- enumerate]
 
-resolveGame :: (Ord u, Enum u, Ord a, Enum a) =>
+resolveGame :: (Show a, Show u, Ord u, Enum u, Ord a, Enum a) =>
   Map (U1 u a) (ModalFormula (U1 u a)) ->
   (u, a)
 resolveGame game = (u1ExtractU fixpt, u1ExtractA fixpt) where
   fixpt = findGeneralGLFixpoint game
 
-playGame :: (Ord u, Enum u, Ord a, Enum a) =>
+playGame :: (Show a, Show u, Ord u, Enum u, Ord a, Enum a) =>
   ModalProgram u a ->
   ModalProgram a (U1 u a) ->
   (u, a)
@@ -109,13 +109,13 @@ gameMap2 universe agent1 agent2 = Map.fromList $ us ++ a1s ++ a2s where
   promoteTo2 (U1 u) = U2 u
   promoteTo2 (Q1 s) = Q2 s
 
-resolveGame2 :: (Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
+resolveGame2 :: (Show u, Show a1, Show a2, Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
   Map (U2 u a1 a2) (ModalFormula (U2 u a1 a2)) ->
   (u, a1, a2)
 resolveGame2 game = (u2ExtractU fp, u2ExtractA1 fp, u2ExtractA2 fp) where
   fp = findGeneralGLFixpoint game
 
-playGame2 :: (Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
+playGame2 :: (Show u, Show a1, Show a2, Ord u, Enum u, Ord a1, Enum a1, Ord a2, Enum a2) =>
   ModalProgram u (Either a1 a2) ->
   ModalProgram a1 (U1 u a1) ->
   ModalProgram a2 (U1 u a2) ->
