@@ -14,9 +14,17 @@ files such as `agents/standard.cd`. This is basically the
 shared-source-code-prisoner's-dilemma-specific parser code (built on top of the
 generic-modal-agent parser code of `Modal/Code.hs`).
 
-`ModalAgents.hs`: is `ModalCombat.hs` but for the `modalagents` executable.
+`ModalAgents.hs`: `ModalCombat.hs` but for the `modalagents` executable.
 
-`Modal/Universes.hs`: is `Combat.hs` but for the Modal UDT framework.
+`Modal/Universes.hs`: `Combat.hs` but for the Modal UDT framework.
+
+`Modal/Code.hs`: The meat of the parser, and contains all the machinery that
+turns modal programs into modal formulas.
+
+`Modal/Statement.hs`: Parses statements, which are like modal formulas but can
+refer to variables at the meta level. They can be turned into a formula given
+a context. (For example, "A()=#a → U()=#u" can be turned into a formula given
+a context containing both a and u.)
 
 `Modal/Code.hs`: The meat of the parser, and contains all the machinery that
 turns modal programs into modal formulas.
