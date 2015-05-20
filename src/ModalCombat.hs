@@ -32,7 +32,7 @@ options :: String -> ParserInfo Options
 options name = info (helper <*> optionParser)
   (  fullDesc
   <> progDesc programDescription
-  <> header (name ++ " - Modal Combat!" ) )
+  <> header (name ++ " - MODAL COMBAT!" ) )
 
 main :: IO ()
 main = do

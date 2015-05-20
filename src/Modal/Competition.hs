@@ -6,14 +6,15 @@ module Modal.Competition where
 import Control.Applicative
 import Control.Arrow ((***))
 import Data.Map (Map)
+import Data.Set (Set)
 import Data.Maybe (fromMaybe)
 import Modal.Statement
 import Modal.Environment
 import Modal.Formulas hiding (left)
 import Modal.Utilities
 import Text.Printf (printf)
-import qualified Data.Map as Map
 import qualified Data.List as List
+import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Text as Text
 
@@ -111,11 +112,11 @@ data MultiVsVar u a
   | PlayerNPlays [Name] Int a
   deriving (Eq, Ord)
 
+-- TODO: This willbe under-informitave if we start allowing programs that
+-- reference other programs.
 instance (Show u, Show a) => Show (MultiVsVar u a) where
-  show (UniversePlays ns x) = printf "%U[%s]=%s" names (show x) where
-    names = List.intercalate "," $ map Text.unpack ns
-  show (PlayerNPlays ns i x) = printf "%[s]#%d=%s" names i (show x) where
-    names = List.intercalate "," $ map Text.unpack ns
+  show (UniversePlays ns x) = printf "%s=%s" (Text.unpack $ head ns) (show x)
+  show (PlayerNPlays ns i x) = printf "%s=%s" (Text.unpack (ns !! i)) (show x)
 
 isEntryFor :: [Name] -> Int -> MultiVsVar u a -> Bool
 isEntryFor ns 0 (UniversePlays xs _) = xs == ns
@@ -162,16 +163,18 @@ multiCompete une pnes = do
 simpleMultiCompetition :: (Ord u, Ord a, IsMultiVarU vu , IsMultiVarA va) =>
   (Name, Map u (ModalFormula (vu u a))) ->
   [(Name, Map a (ModalFormula (va a u)))] ->
-  MultiCompetition u a
-simpleMultiCompetition (uName, uAgent) aPairs = combineMaps uMap pMaps where
-  uMap = Map.fromList $ map createEntry $ Map.toList uAgent where
-    createEntry = UniversePlays names *** fmap (promoteU names)
-  pMaps = map (uncurry createMap) numberedAgents where
-    numberedAgents = zip [1..] (map snd aPairs)
-    createEntry n = PlayerNPlays names n *** fmap (promoteA names n)
-    createMap n = Map.fromList . map (createEntry n) . Map.toList
-  combineMaps xs ys = Map.unions (xs : ys)
-  names = uName : map fst aPairs
+  (MultiCompetition u a)
+simpleMultiCompetition (uName, uAgent) aPairs
+  | length (List.nub names) < length names = error "Ambiguous names." -- TODO
+  | otherwise = combineMaps uMap pMaps where
+    uMap = Map.fromList $ map createEntry $ Map.toList uAgent where
+      createEntry = UniversePlays names *** fmap (promoteU names)
+    pMaps = map (uncurry createMap) numberedAgents where
+      numberedAgents = zip [1..] (map snd aPairs)
+      createEntry n = PlayerNPlays names n *** fmap (promoteA names n)
+      createMap n = Map.fromList . map (createEntry n) . Map.toList
+    combineMaps xs ys = Map.unions (xs : ys)
+    names = uName : map fst aPairs
 
 simpleMultiCompete :: (Show u, Show a, Ord u, Ord a, IsMultiVarU vu , IsMultiVarA va) =>
   (Name, Map u (ModalFormula (vu u a))) ->

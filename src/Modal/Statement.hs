@@ -34,6 +34,11 @@ import qualified Modal.Formulas as F
 
 data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
 
+renderVal :: (Show a, Show o) => Val a o -> String
+renderVal (Number i) = show i
+renderVal (Action a) = show a
+renderVal (Outcome o) = show o
+
 typeOf :: Val a o -> String
 typeOf (Number _) = "number"
 typeOf (Action _) = "action"
@@ -69,7 +74,7 @@ instance Show CompileError where
   show (UnknownArg n a) = printf "unknown argument %s given to %s" (show a) (show n)
   show (TooManyArgs n) = printf "too many arguments given to %s" (show n)
   show (ArgMissing n x) = printf "%s arg missing for %s" (show x) (show n)
-  show (Mismatch n x) = printf "%s mismatch in %n" x (show n)
+  show (Mismatch n x) = printf "%s mismatch in %s" x (show n)
   show (Missing n x) = printf "%s was not given any %s" (show n) x
 
 type Contextual a o m =
@@ -131,7 +136,7 @@ defaultAction = head <$> getAs
 data Ref a = Ref Name | Lit a deriving (Eq, Ord, Read)
 
 instance Show a => Show (Ref a) where
-  show (Ref n) = '$' : Text.unpack n
+  show (Ref n) = '#' : Text.unpack n
   show (Lit x) = show x
 
 instance Parsable a => Parsable (Ref a) where
@@ -139,7 +144,7 @@ instance Parsable a => Parsable (Ref a) where
 
 refParser :: Parsec Text s x -> Parsec Text s (Ref x)
 refParser p =   try (Lit <$> p)
-          <|> try (Ref <$> (char '$' *> name))
+          <|> try (Ref <$> (char '#' *> name))
           <?> "a variable"
 
 -------------------------------------------------------------------------------
@@ -444,7 +449,8 @@ evalUnrestrictedStatement :: (AgentVar v, Contextual a o m) =>
   UnrestrictedStatement v a o -> m (ModalFormula (v a o))
 evalUnrestrictedStatement = _evalStatement evalVar
 
-class (Eq (Act s), Ord (Act s), Eq (Out s), AgentVar (Var s)) => IsStatement s where
+class (Eq (Act s), Ord (Act s), Eq (Out s), Ord (Out s), AgentVar (Var s)) =>
+  IsStatement s where
   type Var s :: * -> * -> *
   type Act s :: *
   type Out s :: *

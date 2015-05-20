@@ -63,6 +63,9 @@ braces = between (symbol "{") (symbol "}")
 name :: Parsec Text s Name
 name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
 
+text :: Parsec Text s Name
+text = identifier (satisfy isNameChar) (satisfy isNameChar)
+
 isNameFirstChar, isNameChar :: Char -> Bool
 isNameFirstChar = (||) <$> isLetter <*> (`elem` "-_'")
 isNameChar = (||) <$> isNameFirstChar <*> isNumber

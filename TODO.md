@@ -74,18 +74,16 @@ Eventually, I'd like to be able to write and run files like the following:
 
 Here's my roadmap to get there from here:
 
-1. Write a parser for the above. I began one in Universe.hs, but it's still
-   pretty limited.
-2. Write a command line tool that reads and executes these files.
-   ModalCombat.hs is an example of how to do this.
+1. Write a parser for umap
 
 Other things on the todo list:
 
-3. Once the above tools exist, revisit Games.hs and GameTools.hs. They will be
+2. Once the above tools exist, revisit Games.hs and GameTools.hs. They will be
    duplicating functionality, and likely should be obsoleted -- although
    perhaps we'll want to improve the tools for building & running games in
    Haskell (rather than just via the parser) before we do so.
-4. Document everything better.
-5. Add tests. Right now, my idiot checks are as follows: run "main" in
+3. Document everything better.
+4. Add tests. Right now, my idiot checks are as follows: run "main" in
    "Games.hs", and run "modalcombat" on "agents/standard.cd". More tests would
    be nice though.
+5. Grep around for TODOs

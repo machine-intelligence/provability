@@ -373,7 +373,7 @@ simplifiedMaxDepth formula =
 fixpointGLEval :: (Show v, Eq v) => v -> ModalFormula v -> [Bool]
 fixpointGLEval var fi = result
   where
-    unmapped var = error $ "Non-fixpoint-variable used in fixpointGLEval: " ++ show var
+    unmapped v = error $ "Non-fixpoint-variable used in fixpointGLEval: " ++ show v
     evalHandler = glEvalHandler{handleVar = \var' ->
         if var == var' then result else unmapped var'}
     result = modalEval evalHandler fi

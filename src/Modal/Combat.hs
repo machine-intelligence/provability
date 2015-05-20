@@ -1,5 +1,6 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 module Modal.Combat where
 import Prelude hiding (mapM, mapM_, sequence, foldr)
 import Control.Applicative
@@ -61,7 +62,7 @@ instance Bitraversable MeVsThem where
 instance AgentVar MeVsThem where
   subagentsIn (ThemVsOtherIs n _) = Set.singleton n
   subagentsIn _ = Set.empty
-  makeAgentVarParser a o = try mvt <|> try tvm <|> try tvo <?> "a modal variable" where
+  makeAgentVarParser a o = try mvt <|> try tvm <|> try tvo <?> "a variable" where
     mvt = choice [string "Me(Them)", string "Me()"] *> (MeVsThemIs <$> a)
     tvm = choice [string "Them(Me)", string "Them()"] *> (ThemVsMeIs <$> o)
     tvo = string "Them(" *> (ThemVsOtherIs <$> name) <*> (char ')' *> o)
@@ -197,7 +198,7 @@ playGame game base = do
 compileFile :: FilePath -> IO (Game (Name, ModalAgent))
 compileFile path = do
   game <- runFile (parse gameParser path) path
-  run $ mapM (compile $ simpleParameters enumerate enumerate) game
+  run $ mapM (\a -> (defName a,) <$> compile (simpleParameters enumerate enumerate) a) game
 
 playFile :: FilePath -> Env MeVsThem CD CD -> IO ()
 playFile path env = compileFile path >>= flip playGame env

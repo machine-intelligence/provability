@@ -24,6 +24,7 @@ import Text.Parsec.Expr
 import Text.Printf (printf)
 import qualified Data.List as List
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Modal.Formulas as F
 
@@ -92,7 +93,7 @@ rangeParser n x = try rEnum <|> try rList <|> try rAll <?> "a range" where
     rEnum = EnumRange <$> (x <* symbol "..") <*> optional x <*> pEnumBy
     pEnumBy = optional (try $ keyword "by" *> n)
     rList = ListRange <$> listParser x
-    rAll = symbol "..." $> TotalRange
+    rAll = brackets (symbol "...") $> TotalRange
 
 boundedRange :: (Parsable (m x), Parsable (m Int)) => Parsec Text s (Range m x)
 boundedRange = try rBoundedEnum <|> try rList <?> "a bounded range" where
@@ -191,7 +192,7 @@ codeFragmentParser a o = pFrag where
   fReturn = try returnThing <|> returnNothing <?> "a return statement"
   returnThing = EarlyReturn . Just <$> (symbol "return" *> refParser a)
   returnNothing = symbol "return" $> EarlyReturn Nothing
-  varname = char '$' *> name
+  varname = char '#' *> name
 
 evalCodeFragment :: forall s m. (IsStatement s, Evalable (Act s) (Out s) m) =>
   CodeFragment s -> m (PartialProgram (Act s) ((Var s) (Act s) (Out s)))
@@ -221,11 +222,18 @@ evalCodeFragment code = case code of
 data Code s
   = Fragment (CodeFragment s) (Code s)
   | Return (Maybe (Ref (Act s)))
+  -- TODO: I'm not sure we want this here.
+  -- As of now, parsing Code is always P.M.E.E., but you can also use this to
+  -- make something that's not P.M.E.E. For now, it's available but can't be
+  -- parsed through the normal parser.
+  | FullMap (Map (Act s) s)
 
 instance (Show s, Show (Act s), Show (Out s)) => Blockable (Code s) where
   blockLines (Fragment f c) = blockLines f ++ blockLines c
   blockLines (Return Nothing) = [(0, "return")]
   blockLines (Return (Just x)) = [(0, Text.pack $ printf "return %s" (show x))]
+  blockLines (FullMap a2s) = [
+    (0, Text.pack $ printf "%s ↔ %s" (show a) (show s)) | (a, s) <- Map.toList a2s]
 
 instance (Show s, Show (Act s), Show (Out s)) => Show (Code s) where
   show = Text.unpack . renderBlock
@@ -242,12 +250,23 @@ codeParser a o = try frag <|> try ret where
   retThing = Just <$> (symbol "return" *> refParser a)
   retNothing = symbol "return" $> Nothing
 
+codeMapParser :: IsStatement s =>
+  Parsec Text u (Act s) -> Parsec Text u (Out s) -> Parsec Text u (Map (Act s) s)
+codeMapParser a o = Map.fromList <$> (asPair `sepEndBy` symbol ";") where
+  asPair = (,) <$> (a <* pIff) <*> makeStatementParser a o
+  pIff = void $ choice [try $ symbol "↔", try $ symbol "<->"]
+
 evalCode :: forall s m. (IsStatement s, Evalable (Act s) (Out s) m) =>
   Code s -> m (ModalProgram (Act s) ((Var s) (Act s) (Out s)))
 evalCode (Fragment f cont) = evalCodeFragment f >>= (<$> evalCode cont)
 evalCode (Return (Just v)) = (F.Val .) . (==) <$> getA v
 evalCode (Return Nothing) = defaultAction >>= evalCode . ret . Just . Lit
   where ret x = Return x :: Code s -- Disambiguates s
+evalCode (FullMap a2smap) = do
+  let a2slist = Map.toList a2smap
+  formulas <- mapM evalStatement (map snd a2slist)
+  let a2flist = zip (map fst a2slist) formulas
+  return $ \a -> let Just f = List.lookup a a2flist in f
 
 codeToProgram :: IsStatement s =>
   Context (Act s) (Out s) -> Code s ->
@@ -262,13 +281,13 @@ type CompiledAgent s = Map (Act s) (ModalFormula (Var s (Act s) (Out s)))
 
 data Def s = Def
   { agentArgs :: [(Name, Maybe (Val (Act s) (Out s)))]
-  , agentActions :: Maybe [Act s]
-  , agentOutcomes :: Maybe [Out s]
-  , agentName :: Name
-  , agentCode :: Code s }
+  , defActions :: Maybe [Act s]
+  , defOutcomes :: Maybe [Out s]
+  , defName :: Name
+  , defCode :: Code s }
 
 instance (Show s, Show (Act s), Show (Out s)) => Blockable (Def s) where
-  blockLines (Def ps oa oo n c) = (0, header) : increaseIndent (blockLines c) where
+  blockLines (Def ps oa oo n c) = (0, header) : increaseIndent (blockLines c) ++ end where
     header = Text.pack $ printf "def %s%s%s%s" (Text.unpack n) x y z
     x = if null ps then ""
         else printf "(%s)" $ List.intercalate ("," :: String) $ map showP ps
@@ -279,6 +298,7 @@ instance (Show s, Show (Act s), Show (Out s)) => Blockable (Def s) where
     y = maybe "" (printf "actions=[%s]" . List.intercalate "," . map show) oa
     z = maybe "" (printf "outcomes=[%s]" . List.intercalate "," . map show) oo
     x, y, z :: String
+    end = [(0, "end")]
 
 instance (Show s, Show (Act s), Show (Out s)) => Show (Def s) where
   show = Text.unpack . renderBlock
@@ -287,35 +307,48 @@ defParser :: IsStatement s =>
   Parsec Text u (Act s) -> Parsec Text u (Out s) ->
   String -> String -> String ->
   Parsec Text u (Def s)
-defParser a o kwa kwo kw = makeDef <$>
-  (keyword kw *> name) <*>
-  option [] (try $ defargsParser a o) <*>
-  deforderParser kwa a <*>
-  deforderParser kwo o <*>
-  codeParser a o
-  where makeDef n ps as os = Def ps as os n
+defParser a o kwa kwo kw = do
+  n <- keyword kw *> name
+  ps <- option [] (try $ defargsParser a o)
+  (as, os) <- defordersParser kwa kwo a o
+  c <- codeParser a o
+  return $ Def ps as os n c
 
+-- TODO: parameterize these keywords.
 defargsParser ::
   Parsec Text u a -> Parsec Text u o ->
   Parsec Text u [(Name, Maybe (Val a o))]
 defargsParser a o = parens (arg `sepBy` comma) where
   arg = try num <|> try act <|> try out
   num = keyword "number" *> ((,) <$> name <*> optional (symbol "=" *> (Number <$> parser)))
-  act = keyword "actions" *> ((,) <$> name <*> optional (symbol "=" *> (Action <$> a)))
-  out = keyword "outcomes" *> ((,) <$> name <*> optional (symbol "=" *> (Outcome <$> o)))
+  act = keyword "action" *> ((,) <$> name <*> optional (symbol "=" *> (Action <$> a)))
+  out = keyword "outcome" *> ((,) <$> name <*> optional (symbol "=" *> (Outcome <$> o)))
 
 deforderParser :: String -> Parsec Text u a -> Parsec Text u (Maybe [a])
-deforderParser kw p = try acts <|> try dunno <|> pure Nothing where
-  acts = Just <$> (keyword kw *> symbol "=" *> brackets (p `sepEndBy` comma))
+deforderParser kw p = keyword kw *> symbol "=" *> try acts <|> try dunno where
+  acts = brackets (p `sepEndBy` comma) <$$> Just
   dunno = brackets (string "...") $> Nothing
+
+defordersParser ::
+  String -> String -> Parsec Text u a -> Parsec Text u o ->
+  Parsec Text u (Maybe [a], Maybe [o])
+defordersParser kwa kwo a o = try forwards <|> (flipT <$> try backwards) <|> neither where
+  forwards = (,) <$> deforderParser kwa a <*> (try (deforderParser kwo o) <|> pure Nothing)
+  backwards = (,) <$> deforderParser kwo o <*> (try (deforderParser kwa a) <|> pure Nothing)
+  neither = return (Nothing, Nothing)
+  flipT (x, y) = (y, x)
+
+agentName :: (Show (Act s), Show (Out s), IsStatement s) =>
+  Parameters (Act s) (Out s) -> Def s -> Name
+agentName params def = defName def <> Text.pack (show params)
 
 compile :: IsStatement s =>
   Parameters (Act s) (Out s) -> Def s ->
-  Either CompileError (Name, CompiledAgent s)
+  Either CompileError (CompiledAgent s)
 compile params def = do
   context <- makeContext params def
-  program <- codeToProgram context (agentCode def)
-  return (agentName def, Map.map F.simplify program)
+  program <- codeToProgram context (defCode def)
+  return $ Map.map F.simplify program
 
 -------------------------------------------------------------------------------
 
@@ -324,21 +357,33 @@ data Parameters a o = Parameters
   , paramKwargs :: Map Name (Val a o)
   , paramActions :: Maybe [a]
   , paramOutcomes :: Maybe [o]
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord)
 
 instance (Parsable a, Parsable o) => Parsable (Parameters a o) where
   parser = paramsParser parser parser
 
+-- TODO: This is functionally useful, and probably shouldn't be a Show instance.
+-- (I don't like it when changing a Show changes functionality elsewhere.)
+instance (Show a, Show o) => Show (Parameters a o) where
+  show (Parameters args kwargs _ _) = printf "(%s%s%s)" argstr mid kwargstr where
+    argstr = List.intercalate "," (map renderVal args)
+    mid = if List.null args || Map.null kwargs then "" else "," :: String
+    kwargstr = List.intercalate "," (map (uncurry renderKwarg) $ Map.toAscList kwargs)
+    renderKwarg n v = printf "%s=%s" (Text.unpack n :: String) (renderVal v) :: String
+
 simpleParameters :: [a] -> [o] -> Parameters a o
 simpleParameters as os = Parameters [] Map.empty (Just as) (Just os)
+
+noParameters :: Parameters a o
+noParameters = Parameters [] Map.empty Nothing Nothing
 
 paramsParser ::
   Parsec Text s a -> Parsec Text s o ->
   Parsec Text s (Parameters a o)
 paramsParser a o = do
-  (args, kwargs) <- argsParser a o
-  as <- option Nothing (orderParser a)
-  os <- option Nothing (orderParser o)
+  (args, kwargs) <- option ([], Map.empty) (try $ argsParser a o)
+  as <- option Nothing (try $ orderParser a)
+  os <- option Nothing (try $ orderParser o)
   return $ Parameters args kwargs as os
 
 argsParser ::
@@ -349,7 +394,7 @@ argsParser a o = parens argsThenKwargs where
   allArgs = arg `sepEndBy` comma
   allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
   kwarg = (,) <$> name <*> (symbol "=" *> arg)
-  arg = try num <|> try act <|> try out <?> "an argument (starting with one of #@$)"
+  arg = try num <|> try act <|> try out <?> "an argument"
   num = Number <$> parser
   act = Action <$> a
   out = Outcome <$> o
@@ -360,7 +405,7 @@ orderParser x = try (Just <$> listParser x) <|> (brackets (string "...") $> Noth
 makeContext :: IsStatement s =>
   Parameters (Act s) (Out s) -> Def s -> Either CompileError (Context (Act s) (Out s))
 makeContext params def = Context <$> vs <*> as <*> os where
-  aname = agentName def
+  aname = defName def
   joinArgs argname Nothing Nothing  = return (argname, Nothing)
   joinArgs argname (Just x) Nothing = return (argname, Just x)
   joinArgs argname Nothing (Just y) = return (argname, Just y)
@@ -383,6 +428,7 @@ makeContext params def = Context <$> vs <*> as <*> os where
     (Nothing, Nothing) -> Left $ Missing aname str
     (Just xs, Nothing) -> return xs
     (Nothing, Just xs) -> return xs
-    (Just xs, Just ys) -> if xs == ys then return xs else Left (Mismatch aname str)
-  as = getMatching "actions" paramActions agentActions
-  os = getMatching "outcomes" paramOutcomes agentOutcomes
+    (Just xs, Just ys) -> if Set.fromList xs == Set.fromList ys then return xs
+                          else Left (Mismatch aname str)
+  as = getMatching "actions" paramActions defActions
+  os = getMatching "outcomes" paramOutcomes defOutcomes
