@@ -348,7 +348,8 @@ glEvalHandler = ModalEvaluator {
 -- an Ord constraint on v unnecessarily.
 glEvalHandlerWithVars :: (Show v, Ord v) => Map v [Bool] -> ModalEvaluator v [Bool]
 glEvalHandlerWithVars m = glEvalHandler{
-    handleVar = fromMaybe (error $ "Unmapped variable in GLEval: " ++ show m) . (`M.lookup` m)}
+    handleVar = \var -> fromMaybe (unmapped var) (var `M.lookup` m)}
+    where unmapped var = error $ "Unmapped variable in GLEval: " ++ show var
 
 glEvalWithVars :: (Show v, Ord v) => Map v [Bool] -> ModalFormula v -> [Bool]
 glEvalWithVars = modalEval . glEvalHandlerWithVars
@@ -369,19 +370,20 @@ simplifiedMaxDepth formula =
     results = take (depth+1) (glEval formula)
     depth = maxModalDepth formula
 
-fixpointGLEval :: Eq v => v -> ModalFormula v -> [Bool]
+fixpointGLEval :: (Show v, Eq v) => v -> ModalFormula v -> [Bool]
 fixpointGLEval var fi = result
   where
+    unmapped var = error $ "Non-fixpoint-variable used in fixpointGLEval: " ++ show var
     evalHandler = glEvalHandler{handleVar = \var' ->
-        if var == var' then result
-        else error "Variable other than the fixpoint in fixpointGLEval"}
+        if var == var' then result else unmapped var'}
     result = modalEval evalHandler fi
 
 generalFixpointGLEval :: (Show v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
 generalFixpointGLEval formulaMap = evalMap
   where
+    unmapped var = error $ "Unmapped variable in generalFixpointGLEval: " ++ show var
     evalHandler = glEvalHandler{handleVar = \var ->
-        fromMaybe (error $ "Unmapped variable in generalFixpointGLEval: " ++ show var) (M.lookup var evalMap)}
+        fromMaybe (unmapped var) (M.lookup var evalMap)}
     evalMap = M.map (modalEval evalHandler) formulaMap
 
 -- Finding the fixedpoints
@@ -405,8 +407,10 @@ findFixpoint :: (Eq a) => Int -> [a] -> a
 findFixpoint n xs = (!!0) $ fromJust $ find (lengthAtLeast n) $ group xs
 
 -- Find the Fixpoint for a Modal formula
-findGLFixpoint :: Eq v => v -> ModalFormula v -> Bool
-findGLFixpoint var formula = findFixpoint (1 + maxModalDepth formula) (fixpointGLEval var formula)
+findGLFixpoint :: (Show v, Eq v) => v -> ModalFormula v -> Bool
+findGLFixpoint var formula = findFixpoint
+  (1 + maxModalDepth formula)
+  (fixpointGLEval var formula)
 
 -- Find the Fixpoint for a collection of Modal formulas
 makeEquivs :: (Ord v, Read v) => [(String, String)] -> Map v (ModalFormula v)
