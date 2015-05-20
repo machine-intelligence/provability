@@ -229,7 +229,7 @@ mformulaParser reader = buildExpressionParser table term <?> "ModalFormula" wher
       , caseSensitive = False }
 
 instance Read v => Read (ModalFormula v) where
-  readsPrec _ s = case parse (parser <* eof) "" (T.pack s) of
+  readsPrec _ s = case parse (parser <* eof) "reading formula" (T.pack s) of
     Right result -> [(result,"")]
     -- We could just return the remaining string, but Parsec gives
     -- much nicer errors. So we ask it to consume the whole input and
@@ -237,6 +237,12 @@ instance Read v => Read (ModalFormula v) where
     Left err -> error $ show err
 
 --------------------------------------------------------------------------------
+
+isModalized :: ModalFormula v -> Bool
+isModalized = modalEval ModalEvaluator {
+  handleVar = const False, handleVal = const True, handleNeg = id,
+  handleAnd = (&&), handleOr = (&&), handleImp = (&&), handleIff = (&&),
+  handleBox = const True, handleDia = const True }
 
 -- Nesting Depth of Modal Operators
 maxModalDepthHandler :: ModalEvaluator v Int
@@ -340,14 +346,14 @@ glEvalHandler = ModalEvaluator {
 
 -- The reason we don't combine this with the above is because that would induce
 -- an Ord constraint on v unnecessarily.
-glEvalHandlerWithVars :: Ord v => Map v [Bool] -> ModalEvaluator v [Bool]
+glEvalHandlerWithVars :: (Show v, Ord v) => Map v [Bool] -> ModalEvaluator v [Bool]
 glEvalHandlerWithVars m = glEvalHandler{
-    handleVar = fromMaybe (error "Unmapped variable in GLEval") . (`M.lookup` m)}
+    handleVar = fromMaybe (error $ "Unmapped variable in GLEval: " ++ show m) . (`M.lookup` m)}
 
-glEvalWithVars :: Ord v => Map v [Bool] -> ModalFormula v -> [Bool]
+glEvalWithVars :: (Show v, Ord v) => Map v [Bool] -> ModalFormula v -> [Bool]
 glEvalWithVars = modalEval . glEvalHandlerWithVars
 
-glEvalWithVarsStandard :: Ord v => Map v [Bool] -> ModalFormula v -> Bool
+glEvalWithVarsStandard :: (Show v, Ord v) => Map v [Bool] -> ModalFormula v -> Bool
 glEvalWithVarsStandard m f = glEvalWithVars m f !! maxModalDepth f
 
 glEval :: ModalFormula v -> [Bool]
@@ -371,11 +377,11 @@ fixpointGLEval var fi = result
         else error "Variable other than the fixpoint in fixpointGLEval"}
     result = modalEval evalHandler fi
 
-generalFixpointGLEval :: Ord v => Map v (ModalFormula v) -> Map v [Bool]
+generalFixpointGLEval :: (Show v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
 generalFixpointGLEval formulaMap = evalMap
   where
     evalHandler = glEvalHandler{handleVar = \var ->
-        fromMaybe (error "Unmapped variable in generalFixpointGLEval") (M.lookup var evalMap)}
+        fromMaybe (error $ "Unmapped variable in generalFixpointGLEval: " ++ show var) (M.lookup var evalMap)}
     evalMap = M.map (modalEval evalHandler) formulaMap
 
 -- Finding the fixedpoints
@@ -406,19 +412,19 @@ findGLFixpoint var formula = findFixpoint (1 + maxModalDepth formula) (fixpointG
 makeEquivs :: (Ord v, Read v) => [(String, String)] -> Map v (ModalFormula v)
 makeEquivs = M.fromList . map (read *** read)
 
-generalGLEvalSeq :: Ord v => Map v (ModalFormula v)-> [Map v Bool]
+generalGLEvalSeq :: (Show v, Ord v) => Map v (ModalFormula v)-> [Map v Bool]
 generalGLEvalSeq formulaMap = map level [0..]
   where
     level n = M.map (!!n) result
     result = generalFixpointGLEval formulaMap
 
-findGeneralGLFixpoint :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v Bool
+findGeneralGLFixpoint :: (Eq v, Show v, Ord v) => Map v (ModalFormula v) -> Map v Bool
 findGeneralGLFixpoint formulaMap = findFixpoint (1 + maxFormulaDepth) results where
   results = generalGLEvalSeq formulaMap
   maxFormulaDepth = maximum $ map maxModalDepth $ M.elems formulaMap
 
 -- Display code to help visualize the kripke frames
-kripkeFrames :: (Eq v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
+kripkeFrames :: (Eq v, Show v, Ord v) => Map v (ModalFormula v) -> Map v [Bool]
 kripkeFrames formulaMap = M.map (take (2 + fixPointer)) results where
   results = generalFixpointGLEval formulaMap
   mapList = generalGLEvalSeq formulaMap

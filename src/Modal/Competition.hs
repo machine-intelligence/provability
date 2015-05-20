@@ -1,9 +1,13 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Modal.Competition where
 import Control.Applicative
 import Control.Arrow ((***))
 import Data.Map (Map)
-import Modal.Code
+import Data.Maybe (fromMaybe)
+import Modal.Statement
 import Modal.Environment
 import Modal.Formulas hiding (left)
 import Modal.Utilities
@@ -43,10 +47,7 @@ is2 _ _ _ = False
 
 class AgentVar v => Canonicalizable2 v where
   canonicalize2 ::
-    (Name -> Name -> a -> x) ->
-    (Name -> Name -> o -> x) ->
-    Name -> Name -> ModalFormula (v a o) ->
-    ModalFormula x
+    (a -> x) -> (Maybe Name -> o -> x) -> ModalFormula (v a o) -> ModalFormula x
 
 --------------------------------------------------------------------------------
 -- Competitions, by default, allow agents with different action types to play
@@ -55,23 +56,22 @@ class AgentVar v => Canonicalizable2 v where
 -- simpler case.
 
 type Competition a o = Map (VsVar a o) (ModalFormula (VsVar a o))
-data CompetitionError = UnknownPlayer Name deriving (Eq, Ord, Read)
-instance Show CompetitionError where
-  show (UnknownPlayer n) = printf "unknown player %s" (Text.unpack n)
 
 -- Attempts to build a map of modal formulas describing the competition, given
 -- two environments and two names.
-competitionMap2 :: (Ord a, Ord o, Canonicalizable2 v1, Canonicalizable2 v2) =>
-  Env v1 a o -> Env v2 o a -> Name -> Name ->
-  Either CompetitionError (Competition a o)
+competitionMap2 :: (Ord x, Ord y, Canonicalizable2 v1, Canonicalizable2 v2) =>
+  Env v1 x y -> Env v2 y x -> Name -> Name -> Either EnvError (Competition x y)
 competitionMap2 env1 env2 name1 name2 = do
-  let getAgent name = maybe (Left $ UnknownPlayer name) Right . Map.lookup name . participants
+  let unknown = Left . UnknownPlayer
+  let getAgent name = maybe (unknown name) Right . Map.lookup name . participants
   agent1 <- getAgent name1 env1
   agent2 <- getAgent name2 env2
   let agent1map = Map.toList agent1
   let agent2map = Map.toList agent2
-  let top1 = map (Vs1 name1 name2 *** canonicalize2 Vs1 Vs2 name1 name2) agent1map
-  let top2 = map (Vs2 name2 name1 *** canonicalize2 Vs2 Vs1 name2 name1) agent2map
+  let expand1 = canonicalize2 (Vs1 name1 name2) (\x -> Vs2 name2 (fromMaybe name1 x))
+  let expand2 = canonicalize2 (Vs2 name2 name1) (\x -> Vs1 name1 (fromMaybe name2 x))
+  let top1 = map (Vs1 name1 name2 *** expand1) agent1map
+  let top2 = map (Vs2 name2 name1 *** expand2) agent2map
   let recurse = competitionMap2 env1 env2
   lefts <- sequence [recurse x name2 | x <- Set.toList $ subagents agent1]
   rights <- sequence [recurse name1 x | x <- Set.toList $ subagents agent2]
@@ -80,9 +80,8 @@ competitionMap2 env1 env2 name1 name2 = do
 -- Attempts to figure out how the two named agents behave against each other.
 -- WARNING: This function may error if the modal formulas in the competition
 -- map are not P.M.E.E. (provably mutally exclusive and extensional).
-compete2 :: (Ord a, Ord o, Canonicalizable2 v1, Canonicalizable2 v2) =>
-  Env v1 a o -> Env v2 o a -> Name -> Name ->
-  Either CompetitionError (a, o)
+compete2 :: (Show x, Show y, Ord x, Ord y, Canonicalizable2 v1, Canonicalizable2 v2) =>
+  Env v1 x y -> Env v2 y x -> Name -> Name -> Either EnvError (x, y)
 compete2 env1 env2 name1 name2 = do
   fixpt <- findGeneralGLFixpoint <$> competitionMap2 env1 env2 name1 name2
   let Vs1 _ _ result1 = extractPMEEkey (is1 name1 name2) fixpt
@@ -93,14 +92,12 @@ compete2 env1 env2 name1 name2 = do
 -- Simplified versions of the above functions for the scenario where both
 -- agents have the same action type.
 
-competitionMap :: (Ord a, Enum a, Canonicalizable2 v) =>
-  Env v a a -> Name -> Name ->
-  Either CompetitionError (Competition a a)
+competitionMap :: (Ord a, Canonicalizable2 v) =>
+  Env v a a -> Name -> Name -> Either EnvError (Competition a a)
 competitionMap env = competitionMap2 env env
 
-compete :: (Ord a, Enum a, Canonicalizable2 v) =>
-  Env v a a -> Name -> Name ->
-  Either CompetitionError (a, a)
+compete :: (Show a, Ord a, Canonicalizable2 v) =>
+  Env v a a -> Name -> Name -> Either EnvError (a, a)
 compete env = compete2 env env
 
 --------------------------------------------------------------------------------
@@ -109,41 +106,40 @@ compete env = compete2 env env
 -- some helper functions (without 2s in their names) exist below to handle this
 -- simpler case.
 
-data MultiVar u a
+data MultiVsVar u a
   = UniversePlays [Name] u
-  | PlayerPlays [Name] Int a
+  | PlayerNPlays [Name] Int a
   deriving (Eq, Ord)
 
-instance (Show u, Show a) => Show (MultiVar u a) where
+instance (Show u, Show a) => Show (MultiVsVar u a) where
   show (UniversePlays ns x) = printf "%U[%s]=%s" names (show x) where
     names = List.intercalate "," $ map Text.unpack ns
-  show (PlayerPlays ns i x) = printf "%[s]#%d=%s" names i (show x) where
+  show (PlayerNPlays ns i x) = printf "%[s]#%d=%s" names i (show x) where
     names = List.intercalate "," $ map Text.unpack ns
 
-isEntryFor :: [Name] -> Int -> MultiVar u a -> Bool
+isEntryFor :: [Name] -> Int -> MultiVsVar u a -> Bool
 isEntryFor ns 0 (UniversePlays xs _) = xs == ns
-isEntryFor ns n (PlayerPlays xs x _) = x == n && xs == ns
+isEntryFor ns n (PlayerNPlays xs x _) = x == n && xs == ns
 isEntryFor _ _ _ = False
 
 class AgentVar v => IsMultiVarA v where
-  promoteA :: [Name] -> Int -> v a u -> MultiVar u a
+  promoteA :: [Name] -> Int -> v a u -> MultiVsVar u a
 
-class IsMultiVarU v where
-  promoteU :: [Name] -> v u a -> MultiVar u a
+class AgentVar v => IsMultiVarU v where
+  promoteU :: [Name] -> v u a -> MultiVsVar u a
 
-type MultiCompetition u a = Map (MultiVar u a) (ModalFormula (MultiVar u a))
+type MultiCompetition u a = Map (MultiVsVar u a) (ModalFormula (MultiVsVar u a))
 
-multiCompetition :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
-  (Name, Env uv u a) ->
-  [(Name, Env av a u)] ->
-  Either CompetitionError (MultiCompetition u a)
+multiCompetition :: (Ord u, Ord a, IsMultiVarU vu, IsMultiVarA va) =>
+  (Name, Env vu u a) -> [(Name, Env va a u)] ->
+  Either EnvError (MultiCompetition u a)
 multiCompetition (uName, uEnv) pnes = combineMaps <$> uMap <*> pMaps where
   getAgent name = maybe (Left $ UnknownPlayer name) Right . Map.lookup name . participants
   uMap = Map.fromList . map createEntry . Map.toList <$> getAgent uName uEnv where
     createEntry = UniversePlays names *** fmap (promoteU names)
   pMaps = do
     numberedAgents <- zip [1..] <$> mapM (uncurry getAgent) pnes
-    let createEntry n = PlayerPlays names n *** fmap (promoteA names n)
+    let createEntry n = PlayerNPlays names n *** fmap (promoteA names n)
     let createTopMap n = Map.fromList . map (createEntry n) . Map.toList
     let createSubMap n = mapM (recurse . switch n) . Set.toList . subagents
     let tops = map (uncurry createTopMap) numberedAgents
@@ -154,27 +150,36 @@ multiCompetition (uName, uEnv) pnes = combineMaps <$> uMap <*> pMaps where
   combineMaps xs ys = Map.unions (xs : ys)
   names = uName : map fst pnes
 
-multiCompete :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
-  (Name, Env uv u a) ->
-  [(Name, Env av a u)] ->
-  Either CompetitionError (u, [a])
+multiCompete :: (Show a, Show u, Ord a, Ord u, IsMultiVarU vu, IsMultiVarA va) =>
+  (Name, Env vu u a) -> [(Name, Env va a u)] -> Either EnvError (u, [a])
 multiCompete une pnes = do
   fixpt <- findGeneralGLFixpoint <$> multiCompetition une pnes
   let names = fst une : map fst pnes
   let UniversePlays _ u = extractPMEEkey (isEntryFor names 0) fixpt
-  return (u, [let PlayerPlays _ _ x = extractPMEEkey (isEntryFor names n) fixpt
+  return (u, [let PlayerNPlays _ _ x = extractPMEEkey (isEntryFor names n) fixpt
               in x | n <- [1 .. length pnes]])
 
-simpleMultiCompetition :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
-  (Name, AgentMap uv u a) ->
-  [(Name, AgentMap av a u)] ->
-  Either CompetitionError (MultiCompetition u a)
-simpleMultiCompetition (uName, uAgent) as = multiCompetition
-  (uName, trivialEnv uName uAgent) (map (\(n, a) -> (n, trivialEnv n a)) as)
+simpleMultiCompetition :: (Ord u, Ord a, IsMultiVarU vu , IsMultiVarA va) =>
+  (Name, Map u (ModalFormula (vu u a))) ->
+  [(Name, Map a (ModalFormula (va a u)))] ->
+  MultiCompetition u a
+simpleMultiCompetition (uName, uAgent) aPairs = combineMaps uMap pMaps where
+  uMap = Map.fromList $ map createEntry $ Map.toList uAgent where
+    createEntry = UniversePlays names *** fmap (promoteU names)
+  pMaps = map (uncurry createMap) numberedAgents where
+    numberedAgents = zip [1..] (map snd aPairs)
+    createEntry n = PlayerNPlays names n *** fmap (promoteA names n)
+    createMap n = Map.fromList . map (createEntry n) . Map.toList
+  combineMaps xs ys = Map.unions (xs : ys)
+  names = uName : map fst aPairs
 
-simpleMultiCompete :: (Ord a, Ord u, IsMultiVarA av, IsMultiVarU uv) =>
-  (Name, AgentMap uv u a) ->
-  [(Name, AgentMap av a u)] ->
-  Either CompetitionError (u, [a])
-simpleMultiCompete (uName, uAgent) as = multiCompete
-  (uName, trivialEnv uName uAgent) (map (\(n, a) -> (n, trivialEnv n a)) as)
+simpleMultiCompete :: (Show u, Show a, Ord u, Ord a, IsMultiVarU vu , IsMultiVarA va) =>
+  (Name, Map u (ModalFormula (vu u a))) ->
+  [(Name, Map a (ModalFormula (va a u)))] ->
+  (u, [a])
+simpleMultiCompete (uName, uAgent) aPairs = (u, as) where
+  fixpt = findGeneralGLFixpoint $ simpleMultiCompetition (uName, uAgent) aPairs
+  names = uName : map fst aPairs
+  UniversePlays _ u = extractPMEEkey (isEntryFor names 0) fixpt
+  as = [let PlayerNPlays _ _ x = extractPMEEkey (isEntryFor names n) fixpt
+        in x | n <- [1 .. length aPairs]]

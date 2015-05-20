@@ -1,3 +1,4 @@
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DeriveFunctor #-}
 module Modal.Combat where
 import Prelude hiding (mapM, mapM_, sequence, foldr)
@@ -15,11 +16,13 @@ import Modal.Display
 import Modal.Environment
 import Modal.Formulas hiding (left)
 import Modal.Parser
+import Modal.Statement hiding (Statement(..))
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Data.Text as Text
 
 -------------------------------------------------------------------------------
@@ -56,26 +59,26 @@ instance Bitraversable MeVsThem where
   bitraverse _ g (ThemVsOtherIs other b) = ThemVsOtherIs other <$> g b
 
 instance AgentVar MeVsThem where
-  otherAgentsReferencedBy (ThemVsOtherIs n _) = [n]
-  otherAgentsReferencedBy _ = []
-  makeVParser a o = try mvt <|> try tvm <|> try tvo <?> "a modal variable" where
+  subagentsIn (ThemVsOtherIs n _) = Set.singleton n
+  subagentsIn _ = Set.empty
+  makeAgentVarParser a o = try mvt <|> try tvm <|> try tvo <?> "a modal variable" where
     mvt = choice [string "Me(Them)", string "Me()"] *> (MeVsThemIs <$> a)
     tvm = choice [string "Them(Me)", string "Them()"] *> (ThemVsMeIs <$> o)
     tvo = string "Them(" *> (ThemVsOtherIs <$> name) <*> (char ')' *> o)
 
 instance Canonicalizable2 MeVsThem where
-  canonicalize2 v1 v2 me them = fmap expandName where
-    expandName (MeVsThemIs val) = v1 me them val
-    expandName (ThemVsMeIs val) = v2 them me val
-    expandName (ThemVsOtherIs other val) = v2 them other val
+  canonicalize2 v1 v2 = fmap expandName where
+    expandName (MeVsThemIs val) = v1 val
+    expandName (ThemVsMeIs val) = v2 Nothing val
+    expandName (ThemVsOtherIs other val) = v2 (Just other) val
 
 instance IsMultiVarA MeVsThem where
-  promoteA names i (MeVsThemIs x) = PlayerPlays names i x
+  promoteA names i (MeVsThemIs x) = PlayerNPlays names i x
   promoteA names _ (ThemVsMeIs x) = UniversePlays names x
   promoteA names i (ThemVsOtherIs other x) = UniversePlays (alter names i $ const other) x
 
 instance (Parsable a, Parsable o) => Parsable (MeVsThem a o) where
-  parser = makeVParser parser parser
+  parser = makeAgentVarParser parser parser
 
 -------------------------------------------------------------------------------
 -- The type of variables in the "old-style" single-formula format, where "a"
@@ -101,8 +104,16 @@ rawToMV (ThemVs n) = ThemVsOtherIs n C
 
 -------------------------------------------------------------------------------
 
-type ModalDef = ModalizedDef MeVsThem CD CD
-type ModalAgent = AgentMap MeVsThem CD CD
+newtype PDStatement = PDStatement { getStatement :: ModalizedStatement MeVsThem CD CD }
+instance IsStatement PDStatement where
+  type Var PDStatement = MeVsThem
+  type Act PDStatement = CD
+  type Out PDStatement = CD
+  makeStatementParser = fmap PDStatement .: modalizedStatementParser
+  evalStatement = evalModalizedStatement . getStatement
+
+type ModalDef = Def PDStatement
+type ModalAgent = CompiledAgent PDStatement
 
 data GameObject a
   = Player a
@@ -134,11 +145,10 @@ instance Traversable Game where
 
 gameObjectParser :: Parser (GameObject ModalDef)
 gameObjectParser = try pY <|> try pR <|> try pP <|> try pD where
-  pY = Player <$> defParser
+  pY = Player <$> defParser parser parser "mine" "theirs" "def"
   pR = Raw <$> (keyword "raw" *> name <* w1) <*> parser
   pP = Play <$> (keyword "play" *> name <* w1) <*> name
   pD = Describe <$> (keyword "describe" *> name <* w1) <*> name
-  defParser = modalizedDefParser parser parser "mine" "theirs" "def"
 
 gameParser :: Parser (Game ModalDef)
 gameParser = Game <$> (gameObjectParser `sepEndBy` w) <* eof
@@ -161,7 +171,7 @@ toCformula m = m >>= cify where
   cify (Vs2 x1 x2 D) = Neg (Var $ Vs2 x1 x2 C)
   cify x = Var x
 
-doAction :: Env MeVsThem CD CD -> GameObject (Name, ModalAgent) -> IO ()
+doAction :: Env MeVsThem CD CD-> GameObject (Name, ModalAgent) -> IO ()
 doAction env (Play n1 n2) = do
   void $ printf "%s vs %s:\n" (Text.unpack n1) (Text.unpack n2)
   (r1, r2) <- run (compete env n1 n2)
@@ -187,7 +197,7 @@ playGame game base = do
 compileFile :: FilePath -> IO (Game (Name, ModalAgent))
 compileFile path = do
   game <- runFile (parse gameParser path) path
-  run $ mapM (compileModalizedAgent noParameters) game
+  run $ mapM (compile $ simpleParameters enumerate enumerate) game
 
 playFile :: FilePath -> Env MeVsThem CD CD -> IO ()
 playFile path env = compileFile path >>= flip playGame env
