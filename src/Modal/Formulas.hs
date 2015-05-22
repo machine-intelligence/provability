@@ -3,6 +3,9 @@ import Control.Applicative hiding ((<|>))
 import Control.Arrow ((***))
 import Control.Monad (ap)
 import Data.List
+import Data.Monoid
+import Data.Foldable hiding (find, maximum)
+import Data.Traversable
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -35,7 +38,7 @@ data ModalFormula v = Val {value :: Bool}
 
 instance Monad ModalFormula where
   return = Var
-  m >>= f = modalEval ModalEvaluator {
+  m >>= f = modalEval ModalEvaluator{
     handleVal = Val, handleVar = f, handleNeg = Neg,
     handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
     handleBox = Box, handleDia = Dia } m
@@ -44,6 +47,18 @@ instance Applicative ModalFormula where
   (<*>) = ap
 instance Functor ModalFormula where
   fmap f m = m >>= (Var . f)
+instance Foldable ModalFormula where
+  foldMap acc = modalEval ModalEvaluator{
+      handleVal = const mempty, handleVar = acc, handleNeg = id,
+      handleAnd = (<>), handleOr = (<>), handleImp = (<>), handleIff = (<>),
+      handleBox = id, handleDia = id }
+instance Traversable ModalFormula where
+  traverse f = modalEval mevaler where
+    mevaler = ModalEvaluator {
+      handleVal = pure . Val, handleVar = fmap Var . f, handleNeg = fmap Neg,
+      handleAnd = liftA2 And, handleOr = liftA2 Or,
+      handleImp = liftA2 Imp, handleIff = liftA2 Iff,
+      handleBox = fmap Box, handleDia = fmap Dia }
 
 -- Syntactic Conveniences:
 infixr   4 %=
@@ -373,7 +388,7 @@ simplifiedMaxDepth formula =
 fixpointGLEval :: (Show v, Eq v) => v -> ModalFormula v -> [Bool]
 fixpointGLEval var fi = result
   where
-    unmapped v = error $ "Non-fixpoint-variable used in fixpointGLEval: " ++ show v
+    unmapped = error . ("Non-fixpoint-variable used in fixpointGLEval: " ++) . show
     evalHandler = glEvalHandler{handleVar = \var' ->
         if var == var' then result else unmapped var'}
     result = modalEval evalHandler fi
@@ -394,6 +409,7 @@ lengthAtLeast 0 _ = True
 lengthAtLeast _ [] = False
 lengthAtLeast n (_:xs) = lengthAtLeast (n-1) xs
 
+-- TODO: infinite loop
 fixpointDepth :: (Eq a) => Int -> [a] -> Int
 fixpointDepth n xs = 1 + countSkipped 0 (group xs) where
   countSkipped acc [] = acc

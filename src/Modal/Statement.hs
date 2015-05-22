@@ -32,6 +32,19 @@ import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
 
+data EvalError
+  = UnknownVar Name ValType
+  | WrongType Name ValType ValType
+  deriving (Eq, Ord)
+
+instance Show EvalError where
+  show (UnknownVar n t) = printf "%s variable %s is undefined" (show t) (show n)
+  show (WrongType n x y) = printf "%s variable %s is not a %s" (show x) (show n) (show y)
+
+type EvalErrorM m = (Applicative m, MonadError EvalError m)
+
+-------------------------------------------------------------------------------
+
 data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
 
 renderVal :: (Show a, Show o) => Val a o -> String
@@ -39,20 +52,25 @@ renderVal (Number i) = show i
 renderVal (Action a) = show a
 renderVal (Outcome o) = show o
 
-typeOf :: Val a o -> String
-typeOf (Number _) = "number"
-typeOf (Action _) = "action"
-typeOf (Outcome _) = "outcome"
+data ValType = NumberT | ActionT | OutcomeT deriving (Eq, Ord, Enum)
+
+instance Show ValType where
+  show NumberT = "number"
+  show ActionT = "action"
+  show OutcomeT = "outcome"
+
+typeOf :: Val a o -> ValType
+typeOf (Number _) = NumberT
+typeOf (Action _) = ActionT
+typeOf (Outcome _) = OutcomeT
 
 typesMatch :: Val a o -> Val a o -> Bool
 typesMatch x y = typeOf x == typeOf y
 
 -------------------------------------------------------------------------------
 
--- TODO: Relocate this.
 data PConf a o = PConf
-  { defKw :: String
-  , actSym :: String
+  { actSym :: String
   , outSym :: String
   , parseA :: Parser a
   , parseO :: Parser o }
@@ -66,50 +84,14 @@ parseAref = refParser . parseA
 parseOref :: PConf a o -> Parser (Ref o)
 parseOref = refParser . parseO
 
+-------------------------------------------------------------------------------
+
 data Context a o = Context
   { variables :: Map Name (Val a o)
   , actionList :: [a]
   , outcomeList :: [o]
   } deriving (Eq, Show)
-
--- TODO: Factor CompileError out of Statement.hs, this is not where it belongs.
--- Also, clean up the various types of errors such that they carry more context
--- (e.g. the name of the agent that had the failure).
-data CompileError
-  = UnknownVar Name String
-  | WrongType Name String String
-  | UnknownArg Name Name
-  | UnknownName Name
-  | ArgMissing Name Name
-  | TooManyArgs Name
-  | Mismatch Name String
-  | Missing Name String
-  | NoList Name String
-  | DefCodeListConflict Name String [String] [String]
-  | CodeCallListConflict Name String [String] [String]
-  deriving (Eq, Ord)
-
-instance Show CompileError where
-  show (UnknownVar n t) = printf "%s variable %s is undefined" t (show n)
-  show (UnknownName n) = printf "unknown name %s" (show n)
-  show (WrongType n x y) = printf "%s variable %s is not a %s" x (show n) y
-  show (UnknownArg n a) = printf "unknown argument %s given to %s" (show a) (show n)
-  show (TooManyArgs n) = printf "too many arguments given to %s" (show n)
-  show (ArgMissing n x) = printf "%s arg missing for %s" (show x) (show n)
-  show (Mismatch n x) = printf "%s mismatch in %s" x (show n)
-  show (Missing n x) = printf "%s was not given any %s" (show n) x
-  show (NoList n x) = printf "%s list missing for %s" x (show n)
-  show (DefCodeListConflict n x as bs) =
-    printf "inner/outer %s conflict for %s (%s/%s)"
-      x (show n) (List.intercalate "," as) (List.intercalate "," bs)
-  show (CodeCallListConflict n x as bs) =
-    printf "outer/call %s conflict for %s (%s/%s)"
-      x (show n) (List.intercalate "," as) (List.intercalate "," bs)
-
-type Contextual a o m =
-  ( Applicative m
-  , MonadState (Context a o) m
-  , MonadError CompileError m )
+type Contextual a o m = (EvalErrorM m, MonadState (Context a o) m)
 type Evalable a o m = (Eq a, Eq o, Contextual a o m)
 
 emptyContext :: [a] -> [o] -> Context a o
@@ -130,25 +112,25 @@ withN n i c = c{variables=Map.insert n (Number i) $ variables c}
 getA :: Contextual a o m => Ref a -> m a
 getA (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
   (Just (Action a)) -> return a
-  (Just (Outcome _)) -> throwError $ WrongType n "action" "outcome"
-  (Just (Number _)) -> throwError $ WrongType n "action" "number"
-  Nothing -> throwError $ UnknownVar n "action"
+  (Just (Outcome _)) -> throwError $ WrongType n ActionT OutcomeT
+  (Just (Number _)) -> throwError $ WrongType n ActionT NumberT
+  Nothing -> throwError $ UnknownVar n ActionT
 getA (Lit a) = return a
 
 getO :: Contextual a o m => Ref o -> m o
 getO (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
   (Just (Outcome o)) -> return o
-  (Just (Action _)) -> throwError $ WrongType n "outcome" "action"
-  (Just (Number _)) -> throwError $ WrongType n "outcome" "number"
-  Nothing -> throwError $ UnknownVar n "outcome"
+  (Just (Action _)) -> throwError $ WrongType n OutcomeT ActionT
+  (Just (Number _)) -> throwError $ WrongType n OutcomeT NumberT
+  Nothing -> throwError $ UnknownVar n OutcomeT
 getO (Lit o) = return o
 
 getN :: Contextual a o m => Ref Int -> m Int
 getN (Ref n) = variables <$> get >>= \vs -> case Map.lookup n vs of
   (Just (Number i)) -> return i
-  (Just (Outcome _)) -> throwError $ WrongType n "action" "outcome"
-  (Just (Action _)) -> throwError $ WrongType n "outcome" "action"
-  Nothing -> throwError $ UnknownVar n "number"
+  (Just (Outcome _)) -> throwError $ WrongType n ActionT OutcomeT
+  (Just (Action _)) -> throwError $ WrongType n OutcomeT ActionT
+  Nothing -> throwError $ UnknownVar n NumberT
 getN (Lit i) = return i
 
 getAs :: Contextual a o m => m [a]
