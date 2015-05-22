@@ -9,6 +9,7 @@ module Modal.Utilities
   , enumerate
   , alter
   , every
+  , swap
   , die
   , force
   , run
@@ -58,6 +59,9 @@ alter (x:xs) n f = x : alter xs (pred n) f
 every :: Int -> [a] -> [a]
 every n (x : xs) = x : every n (drop (pred n) xs)
 every _ [] = []
+
+swap :: (a, b) -> (b, a)
+swap = uncurry $ flip (,)
 
 die :: Show a => a -> IO b
 die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure

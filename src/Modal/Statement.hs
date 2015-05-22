@@ -9,13 +9,13 @@
 module Modal.Statement where
 import Prelude hiding (readFile, sequence, mapM, foldr1, concat, concatMap)
 import Control.Applicative
+import Control.Arrow ((***))
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence, state)
 import Data.Bifunctor
 import Data.Bitraversable
 import Data.Map (Map)
 import Data.Set (Set)
-import Data.Text (Text)
 import Data.Foldable
 import Data.Traversable
 import Modal.Formulas (ModalFormula)
@@ -23,6 +23,7 @@ import Modal.Parser
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Expr
+import Text.Parsec.Text
 import Text.Printf (printf)
 import qualified Data.List as List
 import qualified Data.Map as Map
@@ -48,6 +49,23 @@ typesMatch x y = typeOf x == typeOf y
 
 -------------------------------------------------------------------------------
 
+-- TODO: Relocate this.
+data PConf a o = PConf
+  { defKw :: String
+  , actSym :: String
+  , outSym :: String
+  , parseA :: Parser a
+  , parseO :: Parser o }
+
+numSym :: PConf a o -> String
+numSym = const "#"
+
+parseAref :: PConf a o -> Parser (Ref a)
+parseAref = refParser . parseA
+
+parseOref :: PConf a o -> Parser (Ref o)
+parseOref = refParser . parseO
+
 data Context a o = Context
   { variables :: Map Name (Val a o)
   , actionList :: [a]
@@ -66,6 +84,9 @@ data CompileError
   | TooManyArgs Name
   | Mismatch Name String
   | Missing Name String
+  | NoList Name String
+  | DefCodeListConflict Name String [String] [String]
+  | CodeCallListConflict Name String [String] [String]
   deriving (Eq, Ord)
 
 instance Show CompileError where
@@ -77,6 +98,13 @@ instance Show CompileError where
   show (ArgMissing n x) = printf "%s arg missing for %s" (show x) (show n)
   show (Mismatch n x) = printf "%s mismatch in %s" x (show n)
   show (Missing n x) = printf "%s was not given any %s" (show n) x
+  show (NoList n x) = printf "%s list missing for %s" x (show n)
+  show (DefCodeListConflict n x as bs) =
+    printf "inner/outer %s conflict for %s (%s/%s)"
+      x (show n) (List.intercalate "," as) (List.intercalate "," bs)
+  show (CodeCallListConflict n x as bs) =
+    printf "outer/call %s conflict for %s (%s/%s)"
+      x (show n) (List.intercalate "," as) (List.intercalate "," bs)
 
 type Contextual a o m =
   ( Applicative m
@@ -137,16 +165,20 @@ defaultAction = head <$> getAs
 data Ref a = Ref Name | Lit a deriving (Eq, Ord, Read)
 
 instance Show a => Show (Ref a) where
-  show (Ref n) = '#' : n
+  show (Ref n) = '&' : n
   show (Lit x) = show x
 
 instance Parsable a => Parsable (Ref a) where
   parser = refParser parser
 
-refParser :: Parsec Text s x -> Parsec Text s (Ref x)
+lit :: Ref a -> Maybe a
+lit (Lit a) = Just a
+lit (Ref _) = Nothing
+
+refParser :: Parser x -> Parser (Ref x)
 refParser p =   try (Lit <$> p)
-          <|> try (Ref <$> (char '#' *> name))
-          <?> "a variable"
+            <|> try (Ref <$> (char '&' *> name))
+            <?> "a variable"
 
 -------------------------------------------------------------------------------
 
@@ -178,12 +210,12 @@ instance Traversable Relation where
 instance (Ord a, Parsable a) => Parsable (Relation a) where
   parser = relationParser parser
 
-relationParser :: Parsec Text s x -> Parsec Text s (Relation x)
-relationParser p = go <?> "a relation" where
+relationParser :: Parser x -> Parser (Relation x)
+relationParser p = go where
   go =   try (Equals <$> (sEquals *> p))
      <|> try (NotEquals <$> (sNotEquals *> p))
      <|> try (In <$> (sIn *> set))
-     <|> try (NotIn <$> (sNotIn *> set))
+     <|> NotIn <$> (sNotIn *> set)
   sEquals = void sym where
     sym =   try (symbol "=")
         <|> try (symbol "==")
@@ -205,6 +237,12 @@ relationParser p = go <?> "a relation" where
         <?> "an absence test"
   set = braces $ sepEndBy p comma
 
+relToMentions :: Relation a -> [a]
+relToMentions (Equals a) = [a]
+relToMentions (In as) = as
+relToMentions (NotEquals a) = [a]
+relToMentions (NotIn as) = as
+
 relToFormula :: AgentVar v => v (Relation a) (Relation o) -> ModalFormula (v a o)
 relToFormula = bisequence . bimap toF toF where
   toF (Equals a) = F.Var a
@@ -223,7 +261,7 @@ evalVar v = relToFormula <$> bitraverse (mapM getA) (mapM getO) v
 class Bitraversable v => AgentVar v where
   subagentsIn :: v a o -> Set Name
   subagentsIn = const Set.empty
-  makeAgentVarParser :: Parsec Text s a -> Parsec Text s o -> Parsec Text s (v a o)
+  makeAgentVarParser :: Parser a -> Parser o -> Parser (v a o)
 
 subagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Set Name
 subagents = Set.unions . map fSubagents . Map.elems where
@@ -232,12 +270,10 @@ subagents = Set.unions . map fSubagents . Map.elems where
 hasNoSubagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Bool
 hasNoSubagents = Set.null . subagents
 
-varParser :: AgentVar v =>
-  Parsec Text s a -> Parsec Text s o ->
-  Parsec Text s (v (Relation (Ref a)) (Relation (Ref o)))
-varParser a o = makeAgentVarParser
-  (relationParser $ refParser a)
-  (relationParser $ refParser o)
+varParser :: AgentVar v => PConf a o => Parser (v (Relation (Ref a)) (Relation (Ref o)))
+varParser pconf = makeAgentVarParser
+  (relationParser $ refParser $ symbol (actSym pconf) *> parseA pconf)
+  (relationParser $ refParser $ symbol (outSym pconf) *> parseO pconf)
 
 voidToFormula :: (AgentVar v, Monad m) =>
   v (Relation (Ref Void)) (Relation (Ref Void)) -> m (ModalFormula (v a o))
@@ -245,6 +281,10 @@ voidToFormula _ = fail "Where did you even get this element of the Void?"
 
 -------------------------------------------------------------------------------
 
+-- TODO: Seriously consider removing all the type dickery here,
+-- and just using isModalized at the compile step.
+-- Parse-time safety probably isn't worth the code complexity!
+-- (But right now, removing it isn't worth the time.)
 data Statement v oa oo a o
   = Val Bool
   | Var (v (Relation (Ref oa)) (Relation (Ref oo)))
@@ -275,6 +315,21 @@ instance
   Provable x y == Provable a b = (x == a) && (y == b)
   Possible x y == Possible a b = (x == a) && (y == b)
   _ == _ = False
+
+-- TODO: Add something like getAs and getOs to statement.
+-- It will have to be parameterized on a function (oa -> a).
+getVars ::
+  Statement v oa oo a o ->
+  ([v (Relation (Ref oa)) (Relation (Ref oo))], [v (Relation (Ref a)) (Relation (Ref o))])
+getVars (Var v) = ([v], [])
+getVars (Neg s) = getVars s
+getVars (And x y) = let (a, b) = getVars x in ((a ++) *** (b ++)) (getVars y)
+getVars (Or x y) = let (a, b) = getVars x in ((a ++) *** (b ++)) (getVars y)
+getVars (Imp x y) = let (a, b) = getVars x in ((a ++) *** (b ++)) (getVars y)
+getVars (Iff x y) = let (a, b) = getVars x in ((a ++) *** (b ++)) (getVars y)
+getVars (Provable _ s) = let (xs, ys) = getVars s in ([], xs ++ ys)
+getVars (Possible _ s) = let (xs, ys) = getVars s in ([], xs ++ ys)
+getVars _ = ([], [])
 
 data ShowStatement = ShowStatement {
   topSymbol :: String,
@@ -331,16 +386,12 @@ instance
     (\var -> if var == "0" then "◇" else printf "<%s>" var)
     ("⌜", "⌝")) show show
 
-instance (Parsable oa, Parsable oo, Parsable a, Parsable o, AgentVar v) =>
-  Parsable (Statement v oa oo a o)
-  where parser = statementParser parser parser parser parser
-
-statementParser :: forall s v oa oo a o. AgentVar v =>
-  Parsec Text s oa -> Parsec Text s oo ->
-  Parsec Text s a -> Parsec Text s o ->
-  Parsec Text s (Statement v oa oo a o)
-statementParser oa oo a o = buildExpressionParser lTable term where
-  rvo = varParser oa oo :: Parsec Text s (v (Relation (Ref oa)) (Relation (Ref oo)))
+statementParser :: forall v oa oo a o. AgentVar v =>
+  Parser oa -> Parser oo -> PConf a o -> Parser (Statement v oa oo a o)
+statementParser oa oo pconf = buildExpressionParser lTable term where
+  pconf' = pconf{parseA=oa, parseO=oo}
+  rvo = varParser pconf' :: Parser (v (Relation (Ref oa)) (Relation (Ref oo)))
+  descend = statementParser (parseA pconf) (parseO pconf) pconf
   lTable =
     [ [Prefix lNeg]
     , [Infix lAnd AssocRight]
@@ -348,10 +399,10 @@ statementParser oa oo a o = buildExpressionParser lTable term where
     , [Infix lImp AssocRight]
     , [Infix lIff AssocRight] ]
   term
-    =   parens (statementParser oa oo a o)
+    =   parens (statementParser oa oo pconf)
     <|> try cConsistent
-    <|> try (fProvable <*> quoted (statementParser a o a o))
-    <|> try (fPossible <*> quoted (statementParser a o a o))
+    <|> try (fProvable <*> quoted descend)
+    <|> try (fPossible <*> quoted descend)
     <|> try (Var <$> rvo)
     <|> try (Val <$> val)
   val = try sTop <|> try sBot <?> "a boolean value" where
@@ -430,8 +481,7 @@ _evalStatement handleVar stm = case stm of
 
 type ModalizedStatement v a o = Statement v Void Void a o
 
-modalizedStatementParser :: AgentVar v =>
-  Parsec Text s a -> Parsec Text s o -> Parsec Text s (ModalizedStatement v a o)
+modalizedStatementParser :: AgentVar v => PConf a o -> Parser (ModalizedStatement v a o)
 modalizedStatementParser = statementParser parser parser
 
 evalModalizedStatement :: (AgentVar v, Contextual a o m) =>
@@ -442,19 +492,25 @@ evalModalizedStatement = _evalStatement voidToFormula
 
 type UnrestrictedStatement v a o = Statement v a o a o
 
-unrestrictedStatementParser :: AgentVar v =>
-  Parsec Text s a -> Parsec Text s o -> Parsec Text s (UnrestrictedStatement v a o)
-unrestrictedStatementParser a o = statementParser a o a o
+unrestrictedStatementParser :: AgentVar v => PConf a o -> Parser (UnrestrictedStatement v a o)
+unrestrictedStatementParser pconf = statementParser (parseA pconf) (parseO pconf) pconf
 
 evalUnrestrictedStatement :: (AgentVar v, Contextual a o m) =>
   UnrestrictedStatement v a o -> m (ModalFormula (v a o))
 evalUnrestrictedStatement = _evalStatement evalVar
 
-class (Eq (Act s), Ord (Act s), Eq (Out s), Ord (Out s), AgentVar (Var s)) =>
-  IsStatement s where
+class
+  ( Eq (Act s)
+  , Ord (Act s)
+  , Show (Act s)
+  , Eq (Out s)
+  , Ord (Out s)
+  , Show (Out s)
+  , AgentVar (Var s)
+  ) => IsStatement s where
   type Var s :: * -> * -> *
   type Act s :: *
   type Out s :: *
-  makeStatementParser :: Parsec Text u (Act s) -> Parsec Text u (Out s) -> Parsec Text u s
+  makeStatementParser :: PConf (Act s) (Out s) -> Parser s
   evalStatement :: Contextual (Act s) (Out s) m =>
     s -> m (ModalFormula ((Var s) (Act s) (Out s)))
