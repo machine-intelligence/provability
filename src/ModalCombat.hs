@@ -1,17 +1,15 @@
 module Main where
-import Prelude hiding (foldr)
+import Control.Monad (foldM)
 import Data.Monoid
-import Data.Foldable
 import Options.Applicative
 import System.Environment (getProgName)
 import Modal.Combat
-import Modal.Environment
 import Modal.Utilities
 
 programDescription :: String
 programDescription =
   "Modal combat checker. Figures out how modal agents will behave " <>
-  "in the prisoner's dilemma with shared source code."
+  "when pitted against each other."
 
 data Options = Options
   { optEnvs :: [FilePath]
@@ -38,6 +36,7 @@ main :: IO ()
 main = do
   name <- getProgName
   opts <- execParser $ options name
-  bases <- mapM compileFile (optEnvs opts)
-  env <- run (foldlM insertAll nobody $ map players bases)
-  playFile (optFile opts) env
+  settings <- mapM compileFile (optEnvs opts)
+  case settings of
+    [] -> playFile (optFile opts)
+    (x:xs) -> foldM (run .: mergeSettings) x xs >>= playFile' (optFile opts)

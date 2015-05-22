@@ -1,10 +1,12 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Modal.Environment where
-import Control.Monad (when)
+import Control.Applicative
+import Control.Monad.Except hiding (mapM, sequence)
 import Data.Either (partitionEithers)
 import Data.Map (Map)
 import Data.Set (Set)
@@ -55,11 +57,14 @@ rankIn env name agent = if null missings then Right rank else Left err where
 
 -- If you want to deal with environments in a safe way, you need to handle
 -- errors of this type.
+
 data EnvError
   = UnknownPlayer Name
   | NameCollision Name
   | MissingSubagents Name (Set Name)
   deriving (Eq, Ord, Read)
+
+type EnvErrorM m = (MonadError EnvError m, Applicative m)
 
 instance Show EnvError where
   show (UnknownPlayer n) = printf "Player %s not found in the environment." n

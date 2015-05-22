@@ -69,6 +69,9 @@ parens = between (symbol "(") (symbol ")")
 comma :: Parser ()
 comma = symbol ","
 
+end :: Parser ()
+end = try (symbol ".") <|> keyword "end"
+
 brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")
 

@@ -10,6 +10,7 @@ module Modal.Utilities
   , alter
   , every
   , swap
+  , firstDup
   , die
   , force
   , run
@@ -17,11 +18,13 @@ module Modal.Utilities
   ) where
 import Prelude hiding (readFile)
 import Control.Applicative
+import Control.Monad (foldM)
 import Data.Text (Text)
 import Data.Text.IO (readFile)
 import System.IO (stderr, hPutStrLn)
 import System.Exit hiding (die)
 import Text.Printf (printf)
+import qualified Data.Set as Set
 
 (.:) :: (c -> x) -> (a -> b -> c) -> a -> b -> x
 (.:) = (.) . (.)
@@ -62,6 +65,10 @@ every _ [] = []
 
 swap :: (a, b) -> (b, a)
 swap = uncurry $ flip (,)
+
+firstDup :: Ord a => [a] -> Maybe a
+firstDup = either Just (const Nothing) . foldM addToSet Set.empty where
+  addToSet s x = if x `Set.member` s then Left x else Right (Set.insert x s)
 
 die :: Show a => a -> IO b
 die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure

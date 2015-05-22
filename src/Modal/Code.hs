@@ -11,7 +11,6 @@ import Control.Applicative
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence, state)
 import Data.Map (Map)
-import Data.Maybe
 import Data.Monoid ((<>))
 import Data.Foldable
 import Data.Traversable
@@ -27,7 +26,6 @@ import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
 import qualified Data.List as List
 import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Data.Text as Text
 import qualified Modal.Formulas as F
 
@@ -142,7 +140,9 @@ data CodeFragment s
   | EarlyReturn (Maybe (Ref (Act s)))
   | Pass
 
--- TODO: If you ever add functionality to Statement that allows us to peak in and see which acts/outs were mentioned, then you'll need to update this code to take that into account.
+-- TODO: If you ever add functionality to Statement that allows us to peak in
+-- and see which acts/outs were mentioned, then you'll need to update this code
+-- to take that into account.
 _getCFActs :: IsStatement s => CodeFragment s -> [Act s]
 _getCFActs (ForA _ r fs) = rangeValues (maybe [] pure . lit) r ++ concatMap _getCFActs fs
 _getCFActs (ForO _ _ fs) = concatMap _getCFActs fs
@@ -202,11 +202,11 @@ codeFragmentParser pconf = pFrag where
     <*> parser
   pIf = If
     <$> (keyword "if" *> makeStatementParser pconf)
-    <*> pBlock "end"
+    <*> pBlock end
   pIfElse = IfElse
     <$> (keyword "if" *> makeStatementParser pconf)
-    <*> pBlock "else"
-    <*> pBlock "end"
+    <*> pBlock (keyword "else")
+    <*> pBlock end
   pFor ::
     (Name -> Range Ref x -> [CodeFragment s] -> CodeFragment s) ->
     String ->
@@ -215,8 +215,8 @@ codeFragmentParser pconf = pFrag where
   pFor maker sym rparser = maker
     <$> (keyword "for" *> varname)
     <*> (keyword "in" *> symbol sym *> brackets rparser)
-    <*> pBlock "end"
-  pBlock kw = try (keyword kw $> []) <|> ((:) <$> recurse <*> pBlock kw)
+    <*> pBlock end
+  pBlock ender = try (ender $> []) <|> ((:) <$> recurse <*> pBlock ender)
   pPass = symbol "pass" $> Pass
   pReturn = try returnThing <|> returnNothing <?> "a return statement"
   returnNothing :: Parser (CodeFragment s)
@@ -310,13 +310,12 @@ getOuts _ = []
 codeParser :: IsStatement s => PConf (Act s) (Out s) -> Parser (Code s)
 codeParser pconf = try frag <|> try ret where
   frag = Fragment <$> codeFragmentParser pconf <*> codeParser pconf
-  ret = Return <$> ((try retThing <|> retNothing <?> "a return statement") <* end)
-  end = try (keyword "end") <?> "an 'end'"
+  ret = Return <$> (try retThing <|> retNothing <?> "a return statement")
   retThing = Just <$> (symbol "return" *> parseAref pconf)
   retNothing = symbol "return" $> Nothing
 
-codeMapParser :: IsStatement s => PConf (Act s) (Out s) -> Parser (Map (Act s) s)
-codeMapParser pconf = Map.fromList <$> (asPair `sepEndBy` comma) where
+codeMapParser :: IsStatement s => PConf (Act s) (Out s) -> Parser (Code s)
+codeMapParser pconf = FullMap . Map.fromList <$> (asPair `sepEndBy` comma) where
   parseAsign = symbol (actSym pconf) *> parseA pconf
   asPair = (,) <$> (parseAsign <* pIff) <*> makeStatementParser pconf
   pIff = void $ choice [try $ symbol "↔", try $ symbol "<->", try $ keyword "iff"]
@@ -333,148 +332,11 @@ evalCode (FullMap a2smap) = do
   let a2flist = zip (map fst a2slist) formulas
   return $ \a -> let Just f = List.lookup a a2flist in f
 
-codeToProgram :: IsStatement s =>
-  Context (Act s) (Out s) -> Code s ->
-  Either CompileError (CompiledAgent s)
-codeToProgram context code = runExcept $ do
-  (prog, state) <- runStateT (evalCode code) context
-  return $ Map.fromList [(a, prog a) | a <- actionList state]
-
 -------------------------------------------------------------------------------
--- TODO: Split this out into Agent.hs or Def.hs or something.
 
 type CompiledAgent s = Map (Act s) (ModalFormula (Var s (Act s) (Out s)))
-type Args a o = [(Name, Maybe (Val a o))]
 
-data Def s = Def
-  { defArgs :: Args (Act s) (Out s)
-  , defActions :: Maybe [Act s]
-  , defOutcomes :: Maybe [Out s]
-  , defName :: Name
-  , defCode :: Code s }
-
-instance Show (Def s) where show = defName
-
-defheadParser :: PConf a o -> Parser (Name, Args a o, Maybe [a], Maybe [o])
-defheadParser pconf = do
-  n <- anyname
-  ps <- option [] (try $ defargsParser pconf)
-  let aorder = deforderParser (actSym pconf) (parseA pconf)
-  let oorder = deforderParser (outSym pconf) (parseO pconf)
-  (as, os) <- anyComboOf aorder oorder
-  return (n, ps, join as, join os)
-
-defargsParser :: PConf a o -> Parser (Args a o)
-defargsParser pconf = parens (arg `sepBy` comma) where
-  arg = try num <|> try act <|> try out
-  param sym p = symbol sym *> ((,) <$> name <*> optional (symbol "=" *> p))
-  num = param (numSym pconf) (Number <$> parser)
-  act = param (actSym pconf) (Action <$> parseA pconf)
-  out = param (outSym pconf) (Outcome <$> parseO pconf)
-
-deforderParser :: String -> Parser x -> Parser (Maybe [x])
-deforderParser sym p = symbol sym *> try acts <|> try dunno where
-  acts = brackets (p `sepEndBy` comma) <$$> Just
-  dunno = brackets (string "...") $> Nothing
-
--------------------------------------------------------------------------------
-
-data Call a o = Call
-  { callName :: Name
-  , callArgs :: [Val a o]
-  , callKwargs :: Map Name (Val a o)
-  , callActions :: Maybe [a]
-  , callOutcomes :: Maybe [o]
-  , callAlias :: Maybe Name
-  } deriving (Eq, Ord)
-
-instance (Show a, Show o) => Show (Call a o) where
-  show (Call n args kwargs _ _ alias) = n ++ paramstr ++ aliasstr where
-    aliasstr = maybe "" (printf " as %s") alias
-    paramstr = printf "(%s%s%s)" argstr mid kwargstr
-    argstr = renderArgs renderVal args
-    mid = if List.null args || Map.null kwargs then "" else "," :: String
-    kwargstr = renderArgs (uncurry showKwarg) (Map.toAscList kwargs)
-    showKwarg k v = printf "%s=%s" k (renderVal v)
-
-callHandle :: (Show x, Show y) => Call x y -> Name
-callHandle call = fromMaybe (show call) (callAlias call)
-
-callParser :: PConf x y -> Parser (Call x y)
-callParser pconf = do
-  n <- anyname
-  (args, kwargs) <- option ([], Map.empty) (try argsParser)
-  as <- morderParser (actSym pconf) (parseA pconf)
-  os <- morderParser (outSym pconf) (parseO pconf)
-  alias <- optional (try (keyword "as" *> anyname))
-  return $ Call n args kwargs as os alias
-  where
-    orderParser p = try (Just <$> listParser p) <|> (brackets (string "...") $> Nothing)
-    morderParser sym p = option Nothing $ try (symbol sym *> orderParser p)
-    argsParser = parens argsThenKwargs where
-      argsThenKwargs = (,) <$> allArgs <*> allKwargs
-      allArgs = arg `sepEndBy` comma
-      allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
-      kwarg = (,) <$> name <*> (symbol "=" *> arg)
-      arg = try num <|> try act <|> try out <?> "an argument"
-      num = symbol (numSym pconf) *> (Number <$> parser)
-      act = symbol (actSym pconf) *> (Action <$> parseA pconf)
-      out = symbol (outSym pconf) *> (Outcome <$> parseO pconf)
-
-compile :: IsStatement s =>
-  Def s -> Call (Act s) (Out s) ->
-  Either CompileError (CompiledAgent s)
-compile def call = do
-  context <- makeContext def call
-  program <- codeToProgram context (defCode def)
-  return $ Map.map F.simplify program
-
-defcallAOlists :: (IsStatement s, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m ([Act s], [Out s])
-defcallAOlists def call = do
-  let (codeAs, codeOs) = (getActs (defCode def), getOuts (defCode def))
-  let (defAs, defOs) = (defActions def, defOutcomes def)
-  let (callAs, callOs) = (callActions call, callOutcomes call)
-  as <- ensureRinL (ccerr "action") callAs =<< ensureRinL (dcerr "action") defAs codeAs
-  os <- ensureRinL (ccerr "outcome") callOs =<< ensureRinL (dcerr "outcome") defOs codeOs
-  return (as, os)
-  where
-    dcerr, ccerr :: Show x => String -> [x] -> [x] -> CompileError
-    dcerr str xs ys = DefCodeListConflict (defName def) str (map show xs) (map show ys)
-    ccerr str xs ys = CodeCallListConflict (defName def) str (map show xs) (map show ys)
-    ensureRinL _ Nothing olds = return olds
-    ensureRinL err (Just news) olds
-     | Set.fromList olds `Set.isSubsetOf` Set.fromList news = return news
-     | otherwise = throwError $ err olds news
-
-defcallArgs :: (IsStatement s, Functor m, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m (Map Name (Val (Act s) (Out s)))
-defcallArgs def call = do
-  when (length (callArgs call) > length (defArgs def)) (throwError $ TooManyArgs $ show call)
-  arglist <- mapM handleArgs (zip (defArgs def) infiniteCallArgs)
-  Map.fromList <$> mapM handleKwargs arglist
-  where
-    infiniteCallArgs = (Just <$> callArgs call) ++ repeat Nothing
-    handleKwargs (k, v) = joinKwargs k (Map.lookup k (callKwargs call)) v
-    handleArgs ((n, mdflt), mval) = joinArgs n mdflt mval
-    joinArgs n Nothing mval = return (n, mval)
-    joinArgs n mdflt Nothing = return (n, mdflt)
-    joinArgs n (Just dflt) (Just val)
-      | typesMatch dflt val = return (n, Just val)
-      | otherwise = throwError (WrongType n (typeOf dflt) (typeOf val))
-    joinKwargs n Nothing Nothing  = throwError (ArgMissing (defName def) n)
-    joinKwargs n (Just dflt) (Just val)
-      | typesMatch dflt val = return (n, val)
-      | otherwise = throwError (WrongType n (typeOf dflt) (typeOf val))
-    joinKwargs n mdflt mval = return (n, fromMaybe (fromJust mdflt) mval)
-
--- TODO: Extract as and os from the code. Use them if they aren't present.
--- Verify that they match if they are present.
-makeContext :: (IsStatement s, Functor m, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m (Context (Act s) (Out s))
-makeContext def call = do
-  args <- defcallArgs def call
-  (as, os) <- defcallAOlists def call
-  when (List.null as) (throwError (NoList (defName def) "action"))
-  when (List.null os) (throwError (NoList (defName def) "outcome"))
-  return $ Context args as os
+codeToProgram :: (IsStatement s, EvalErrorM m) =>
+  Context (Act s) (Out s) -> Code s -> m (CompiledAgent s)
+codeToProgram context code = uncurry toProg <$> runStateT (evalCode code) context where
+  toProg prog state = Map.fromList [(a, prog a) | a <- actionList state]
