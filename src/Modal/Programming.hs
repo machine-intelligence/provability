@@ -5,18 +5,18 @@ import Control.Arrow
 import Control.Category
 import Data.Maybe
 import qualified Data.List as List
-import Data.Text (Text)
 import Modal.Display
 import Modal.Formulas
 import Modal.Parser
-import Text.Parsec (Parsec, sepEndBy)
+import Text.Parsec (sepEndBy)
+import Text.Parsec.Text
 
 type ModalProgram a v = a -> ModalFormula v
 
 showProgram :: (Show a, Show v) => [a] -> ModalProgram a v -> String
 showProgram as p = renderTable $ tuplesToTable [(a, p a) | a <- as]
 
-programParser :: (Eq a, Read v) => Parsec Text s a -> Parsec Text s (ModalProgram a v)
+programParser :: (Eq a, Read v) => Parser a -> Parser (ModalProgram a v)
 programParser p = makeProgram <$> (line `sepEndBy` w) where
   line = (,) <$> (p <* symbol ":") <*> parser
   makeProgram kvs = fromJust . flip List.lookup kvs

@@ -6,12 +6,12 @@ import Data.Char
 import Data.Functor.Identity
 import Data.Set (Set)
 import qualified Data.Set as Set
-import Data.Text (Text)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many)
+import Text.Parsec.Text (Parser)
 
 class Parsable a where
-  parser :: Parsec Text s a
+  parser :: Parser a
 
 instance Parsable Int where
   parser = read <$> many1 digit
@@ -24,47 +24,68 @@ instance Parsable a => Parsable (Identity a) where
 instance Parsable Void where
   parser = fail "Cannot instantiate the Void."
 
-listParser :: Parsec Text s x -> Parsec Text s [x]
+listParser :: Parser x -> Parser [x]
 listParser p = brackets $ sepEndBy p comma
 
-setParser :: Ord x => Parsec Text s x -> Parsec Text s (Set x)
+setParser :: Ord x => Parser x -> Parser (Set x)
 setParser p = Set.fromList <$> braces (sepEndBy p comma)
 
-keyword :: String -> Parsec Text s ()
+keyword :: String -> Parser ()
 keyword s = void $ w *> string s <* lookAhead ok <* w where
   ok = try eof <|> void (satisfy isOk)
   isOk c = not (isLetter c) && not (isNumber c) && c `notElem` "-_"
 
-symbol :: String -> Parsec Text s ()
+symbol :: String -> Parser ()
 symbol s = void $ w *> string s <* w
 
-w :: Parsec Text s ()
-w = void $ many $ satisfy isSpace
+_ignoredToken :: Parser ()
+_ignoredToken = try _blockComment <|> try _lineComment <|> void (satisfy isSpace)
 
-w1 :: Parsec Text s ()
-w1 = try (void $ many1 $ satisfy isSpace) <|> eof
+_blockComment :: Parser ()
+_blockComment = void $ o *> many innards *> c where
+  m = void $ char '#'
+  o = char '{' *> m
+  c = m *> char '}'
+  nonMark = void $ noneOf "#"
+  safeMark = m *> notFollowedBy (char '}')
+  innards = try _blockComment <|> try nonMark <|> safeMark
 
-identifier :: Parsec Text s Char -> Parsec Text s Char -> Parsec Text s Name
-identifier h t = ((:) <$> h <*> many t)
+_lineComment :: Parser ()
+_lineComment = char '#' *> many (noneOf "\n") *> eol where
+  eol = try (void newline) <|> try eof <?> "a line ending"
 
-parens :: Parsec Text s a -> Parsec Text s a
+w :: Parser ()
+w = void $ many _ignoredToken
+
+w1 :: Parser ()
+w1 = try (void $ many1 _ignoredToken) <|> eof
+
+identifier :: Parser Char -> Parser Char -> Parser Name
+identifier h t = (:) <$> h <*> many t
+
+parens :: Parser a -> Parser a
 parens = between (symbol "(") (symbol ")")
 
-comma :: Parsec Text s ()
+comma :: Parser ()
 comma = symbol ","
 
-brackets :: Parsec Text s a -> Parsec Text s a
+brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")
 
-braces :: Parsec Text s a -> Parsec Text s a
+braces :: Parser a -> Parser a
 braces = between (symbol "{") (symbol "}")
 
-name :: Parsec Text s Name
+name :: Parser Name
 name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
 
-anyname :: Parsec Text s Name
+anyname :: Parser Name
 anyname = identifier (satisfy isNameChar) (satisfy isNameChar)
 
 isNameFirstChar, isNameChar :: Char -> Bool
 isNameFirstChar = (||) <$> isLetter <*> (`elem` "-_'")
 isNameChar = (||) <$> isNameFirstChar <*> isNumber
+
+anyComboOf :: Parser x -> Parser y -> Parser (Maybe x, Maybe y)
+anyComboOf x y = try xThenMaybeY <|> try yThenMaybeX <|> pure (Nothing, Nothing) where
+  xThenMaybeY = (,) <$> (Just <$> x) <*> optional y
+  yThenMaybeX = flip (,) <$> (Just <$> y) <*> optional x

@@ -1,24 +1,24 @@
-agent UDT(action default, number start=0, number step=0)
-  let #level = #start
-  for outcome #o in [...]
-    for action #a in [...]
-       if □⌜Me()=#a → Them()=#o⌝
-         return #a
+theory UDT(@default, #start=0, #step=0) where
+  let level = start
+  for outcome o in [...]
+    for action a in [...]
+       if □⌜Me()=&a → Them()=&o⌝ then
+         return a
        end
-       let #level = #level + #step
+       let level = level + step
      end
   end
-  return #default
+  return default
 end
 
-universe FiveAndTen actions=[@5, @10] outcomes=[$10, $5]
+problem FiveAndTen @[5, 10] $[10, 5]
   if A()=@5
     return $5
   end
   return $10
 end
 
-universe EasyNewcomb actions=[@1, @2] outcomes=[$1001000, $1000000, $1000, $0]
+problem EasyNewcomb @[1, 2] $[1001000, 1000000, 1000, 0]
   if A()=@2 and A()=@1
      return $1001000
   end
@@ -31,7 +31,7 @@ universe EasyNewcomb actions=[@1, @2] outcomes=[$1001000, $1000000, $1000, $0]
   return $0
 end
 
-universe Newcomb(number level=0) actions=[@1, @2] outcomes=[$1001000, $1000000, $1000, $0]
+problem Newcomb(number level=0) @[1, 2] $[1001000, 1000000, 1000, 0]
   if A()=@2 and [#level]⌜A()=@1⌝
      return $1001000
   end

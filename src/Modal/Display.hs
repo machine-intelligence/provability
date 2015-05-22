@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Modal.Display where
 import Control.Arrow (first)
-import Data.List (transpose)
+import Data.List (transpose, intercalate)
 import Data.Map hiding (map, foldr)
 import Data.Monoid ((<>), mconcat)
 import Data.Text (Text)
@@ -73,3 +73,7 @@ displayBlock' = Text.IO.putStrLn .: renderBlock'
 
 displayBlock :: Blockable a => a -> IO ()
 displayBlock = Text.IO.putStrLn . renderBlock
+
+-- TODO: Replace as many List.intercalates as you can with this.
+renderArgs :: (a -> String) -> [a] -> String
+renderArgs f = intercalate ", " . map f
