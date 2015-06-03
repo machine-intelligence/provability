@@ -2,7 +2,7 @@ agent UDT(action default, number start=0, number step=0)
   let #level = #start
   for outcome #o in [...]
     for action #a in [...]
-       if □⌜Me()=#a → Them()=#o⌝
+       if [#level]⌜Me()=#a → Them()=#o⌝
          return #a
        end
        let #level = #level + #step
