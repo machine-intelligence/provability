@@ -252,7 +252,7 @@ subagents = Set.unions . map fSubagents . Map.elems where
 hasNoSubagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Bool
 hasNoSubagents = Set.null . subagents
 
-varParser :: AgentVar v => PConf a o => Parser (v (Relation (Ref a)) (Relation (Ref o)))
+varParser :: AgentVar v => PConf a o -> Parser (v (Relation (Ref a)) (Relation (Ref o)))
 varParser pconf = makeAgentVarParser
   (relationParser $ refParser $ symbol (actSym pconf) *> parseA pconf)
   (relationParser $ refParser $ symbol (outSym pconf) *> parseO pconf)
