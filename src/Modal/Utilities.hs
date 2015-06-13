@@ -19,7 +19,7 @@ import Control.Applicative
 import Data.Text (Text)
 import Data.Text.IO (readFile)
 import System.IO (stderr, hPutStrLn)
-import System.Exit
+import System.Exit hiding (die)
 import Text.Printf (printf)
 
 (.:) :: (c -> x) -> (a -> b -> c) -> a -> b -> x

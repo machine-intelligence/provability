@@ -33,7 +33,7 @@ setParser p = Set.fromList <$> braces (sepEndBy p comma)
 keyword :: String -> Parsec Text s ()
 keyword s = void $ w *> string s <* lookAhead ok <* w where
   ok = try eof <|> void (satisfy isOk)
-  isOk c = not (isLetter c) && not (isNumber c) && c `notElem` "-_"
+  isOk c = not (isLetter c) && not (isNumber c) && c `notElem` ("-_" :: String)
 
 symbol :: String -> Parsec Text s ()
 symbol s = void $ w *> string s <* w
@@ -66,5 +66,5 @@ anyname :: Parsec Text s Name
 anyname = identifier (satisfy isNameChar) (satisfy isNameChar)
 
 isNameFirstChar, isNameChar :: Char -> Bool
-isNameFirstChar = (||) <$> isLetter <*> (`elem` "-_'")
+isNameFirstChar = (||) <$> isLetter <*> (`elem` ("-_'" :: String))
 isNameChar = (||) <$> isNameFirstChar <*> isNumber
