@@ -27,7 +27,7 @@ type AgentMap v a o = Map a (ModalFormula (v a o))
 newtype Env v a o = Env { _participants :: Map Name (AgentMap v a o, Int) }
 
 instance Show a => Show (Env v a o) where
-	show (Env ps) = printf "{%s}" (List.intercalate ", " $ Map.keys ps)
+  show (Env ps) = printf "{%s}" (List.intercalate ", " $ Map.keys ps)
 
 nobody :: Env v a o
 nobody = Env Map.empty
