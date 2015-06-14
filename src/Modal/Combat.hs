@@ -82,108 +82,115 @@ instance Read U where
   readsPrec _ str = [(U x, rest) | not $ null x] where
     (x, rest) = span P.isNameChar str
 
-data BiVar m t = Me m | Them t | ThemVs Name t deriving (Eq, Ord)
-instance (Show a, Show o) => Show (BiVar a o) where
+data AUVar a u = AMe a | AThem u deriving (Eq, Ord)
+instance (Show a, Show u) => Show (AUVar a u) where
+  show (AMe a) = printf "A()%s" (show a)
+  show (AThem u) = printf "U()%s" (show u)
+instance Bifunctor AUVar where
+  bimap f g = runIdentity . bitraverse (Identity . f) (Identity . g)
+instance Bifoldable AUVar where
+  bifoldMap f _ (AMe a) = f a
+  bifoldMap _ g (AThem u) = g u
+instance Bitraversable AUVar where
+  bitraverse f _ (AMe a) = AMe <$> f a
+  bitraverse _ g (AThem u) = AThem <$> g u
+instance AgentVar AUVar where
+  makeAgentVarParser a u = try avu <|> try uva <?> "a variable" where
+    avu = string "A" *> (try (string "()") <|> pure "")  *> (AMe <$> a)
+    uva = string "U" *> (try (string "()") <|> pure "") *> (AThem <$> u)
+instance (Parsable a, Parsable u) => Parsable (AUVar a u) where
+  parser = makeAgentVarParser parser parser
+instance (Parsable a, Parsable u) => Read (AUVar a u) where
+  readsPrec _ s = case parse (parser <* eof) "reading AUVar" (Text.pack s) of
+    Right result -> [(result,"")]
+    Left err -> error $ show err
+instance IsMultiVarA AUVar where
+  promoteA i (AMe a) = PlayerNPlays i a
+  promoteA _ (AThem u) = UniversePlays u
+
+data UAVar u a = UMe u | UThem Int a deriving (Eq, Ord)
+instance (Show a, Show u) => Show (UAVar a u) where
+  show (UMe u) = printf "U()%s" (show u)
+  show (UThem n a) = printf "A%d()%s" n (show a)
+instance Bifunctor UAVar where
+  bimap f g = runIdentity . bitraverse (Identity . f) (Identity . g)
+instance Bifoldable UAVar where
+  bifoldMap f _ (UMe u) = f u
+  bifoldMap _ g (UThem _ a) = g a
+instance Bitraversable UAVar where
+  bitraverse f _ (UMe u) = UMe <$> f u
+  bitraverse _ g (UThem n a) = UThem n <$> g a
+instance AgentVar UAVar where
+  makeAgentVarParser u a = try uva <|> try avu <?> "a variable" where
+    uva = string "U" *> (try (string "()") <|> pure "") *> (UMe <$> u)
+    avu = UThem <$> (string "A" *> parser) <*> ((try (string "()") <|> pure "") *> a)
+instance (Parsable u, Parsable a) => Parsable (UAVar u a) where
+  parser = makeAgentVarParser parser parser
+instance (Parsable u, Parsable a) => Read (UAVar u a) where
+  readsPrec _ s = case parse (parser <* eof) "reading UAVar" (Text.pack s) of
+    Right result -> [(result,"")]
+    Left err -> error $ show err
+instance IsMultiVarU UAVar where
+  promoteU (UMe u) = UniversePlays u
+  promoteU (UThem n a) = PlayerNPlays n a
+
+data CombatVar m t = Me m | Them t | ThemVs Name t deriving (Eq, Ord)
+instance (Show a, Show o) => Show (CombatVar a o) where
   show (Me m) = printf "Me(Them)%s" (show m)
   show (Them t) = printf "Them(Me)%s" (show t)
   show (ThemVs n t) = printf "Them(%s)%s" n (show t)
-instance Bifunctor BiVar where
+instance Bifunctor CombatVar where
   bimap f g = runIdentity . bitraverse (Identity . f) (Identity . g)
-instance Bifoldable BiVar where
+instance Bifoldable CombatVar where
   bifoldMap f _ (Me m) = f m
   bifoldMap _ g (Them t) = g t
   bifoldMap _ g (ThemVs _ t) = g t
-instance Bitraversable BiVar where
+instance Bitraversable CombatVar where
   bitraverse f _ (Me m) = Me <$> f m
   bitraverse _ g (Them t) = Them <$> g t
   bitraverse _ g (ThemVs x t) = ThemVs x <$> g t
-instance AgentVar BiVar where
+instance AgentVar CombatVar where
   makeAgentVarParser m t = try mvt <|> try tvm <|> try tvo <?> "a variable" where
     vsEither a b x y z = try (vs a b z) <|> vs x y z
-    mvt = Me . snd <$> vsEither (string "A") (nilOr "U") (string "Me") (nilOr "Them") m
-    tvm = Them . snd <$> vsEither (string "U") (nilOr "A") (string "Them") (nilOr "Me") t
-    tvo = uncurry ThemVs <$> vsEither (string "U") P.anyname (string "Them") P.anyname t
+    mvt = Me . snd <$> vs (string "Me") (nilOr "Them") m
+    tvm = Them . snd <$> vs (string "Them") (nilOr "Me") t
+    tvo = uncurry ThemVs <$> vs (string "Them") P.anyname t
     vs x y z = (,) <$> (x *> P.parens y) <*> z
     nilOr = option () . void . string
-instance (Parsable m, Parsable t) => Parsable (BiVar m t) where
+instance (Parsable m, Parsable t) => Parsable (CombatVar m t) where
   parser = makeAgentVarParser parser parser
-instance (Parsable u, Parsable a) => Read (BiVar u a) where
-  readsPrec _ s = case parse (parser <* eof) "reading BiVar" (Text.pack s) of
+instance (Parsable u, Parsable a) => Read (CombatVar u a) where
+  readsPrec _ s = case parse (parser <* eof) "reading CombatVar" (Text.pack s) of
     Right result -> [(result,"")]
     Left err -> error $ show err
-instance Canonicalizable2 BiVar where
-  canonicalize2 v1 v2 = fmap expandName where
+instance ModalCombatVar CombatVar where
+  makeModalVar v1 v2 = fmap expandName where
     expandName (Me val) = v1 val
     expandName (Them val) = v2 Nothing val
     expandName (ThemVs other val) = v2 (Just other) val
-instance IsMultiVarA BiVar where
-  promoteA names i (Me x) = PlayerNPlays names i x
-  promoteA names _ (Them x) = UniversePlays names x
-  promoteA names i (ThemVs other x) = UniversePlays (alter names i $ const other) x
 
-data MultiVar u a = UPlays u | APlays Name a | APlaysVs Name Name a deriving (Eq, Ord)
-instance (Show a, Show o) => Show (MultiVar a o) where
-  show (UPlays u) = printf "U(...)%s" (show u)
-  show (APlays n a) = printf "%s(U)%s" n (show a)
-  show (APlaysVs n other a) = printf "%s(%s)%s" n other (show a)
-instance Bifunctor MultiVar where
-  bimap f g = runIdentity . bitraverse (Identity . f) (Identity . g)
-instance Bifoldable MultiVar where
-  bifoldMap f _ (UPlays u) = f u
-  bifoldMap _ g (APlays _ a) = g a
-  bifoldMap _ g (APlaysVs _ _ a) = g a
-instance Bitraversable MultiVar where
-  bitraverse f _ (UPlays u) = UPlays <$> f u
-  bitraverse _ g (APlays n a) = APlays n <$> g a
-  bitraverse _ g (APlaysVs n other a) = APlaysVs n other <$> g a
-instance AgentVar MultiVar where
-  makeAgentVarParser u a = try uvp <|> try pvu <|> try pvo <?> "a variable" where
-    uvp = (\(_, _, x) -> UPlays x)  <$> vs (string "U") (pure ()) u
-    pvu = (\(n, _, x) -> APlays n x) <$> vs P.anyname (option () $ void $ string "U") a
-    pvo = (\(n, o, x) -> APlaysVs n o x) <$> vs P.anyname P.anyname a
-    vs x y z = (,,) <$> x <*> P.parens y <*> z
-instance (Parsable u, Parsable a) => Parsable (MultiVar u a) where
-  parser = makeAgentVarParser parser parser
-instance (Parsable u, Parsable a) => Read (MultiVar u a) where
-  readsPrec _ s = case parse (parser <* eof) "reading MultiVar" (Text.pack s) of
-    Right result -> [(result,"")]
-    Left err -> error $ show err
-instance Canonicalizable2 MultiVar where
-  canonicalize2 v1 v2 = fmap expandName where
-    expandName (UPlays val) = v1 val
-    expandName (APlays _ val) = v2 Nothing val
-    expandName (APlaysVs _ other val) = v2 (Just other) val
-instance IsMultiVarU MultiVar where
-  promoteU names (UPlays x) = return $ UniversePlays names x
-  promoteU names (APlays n x) =
-    maybe (throwError $ UnknownPlayer n) make (List.elemIndex n names)
-    where make i = return $ PlayerNPlays names i x
-  promoteU names (APlaysVs n other x) =
-    maybe (throwError $ UnknownPlayer n) make (List.elemIndex n names)
-    where make i = return $ PlayerNPlays (alter names 0 $ const other) i x
-
-newtype AAStatement = AAStatement { getAAStatement :: ModalizedStatement BiVar A A }
+newtype AAStatement = AAStatement { getAAStatement :: ModalizedStatement CombatVar A A }
   deriving Show
 instance IsStatement AAStatement where
-  type Var AAStatement = BiVar
+  type Var AAStatement = CombatVar
   type Act AAStatement = A
   type Out AAStatement = A
   makeStatementParser = fmap AAStatement . modalizedStatementParser
   evalStatement = evalModalizedStatement . getAAStatement
 
-newtype AUStatement = AUStatement { getAUStatement :: ModalizedStatement BiVar A U }
+newtype AUStatement = AUStatement { getAUStatement :: ModalizedStatement AUVar A U }
   deriving Show
 instance IsStatement AUStatement where
-  type Var AUStatement = BiVar
+  type Var AUStatement = AUVar
   type Act AUStatement = A
   type Out AUStatement = U
   makeStatementParser = fmap AUStatement . modalizedStatementParser
   evalStatement = evalModalizedStatement . getAUStatement
 
-newtype UStatement = UStatement { getUStatement :: UnrestrictedStatement MultiVar U A }
+newtype UStatement = UStatement { getUStatement :: UnrestrictedStatement UAVar U A }
   deriving Show
 instance IsStatement UStatement where
-  type Var UStatement = MultiVar
+  type Var UStatement = UAVar
   type Act UStatement = U
   type Out UStatement = A
   makeStatementParser = fmap UStatement . unrestrictedStatementParser
@@ -214,19 +221,15 @@ instance Parsable Controls where
 
 data GameObject
   = Bot Bot
+  | BotEnv Name [Call A A]
   | Agent Agent
   | Universe Universe
-  | BotEnv Name [Call A A]
-  | AgentEnv Name [Call A U]
-  | UniverseEnv Name [Call U A]
   | Execute Action
   deriving Show
 
 instance Parsable GameObject where
   parser
-    = try (uncurry UniverseEnv <$> pEnv "universe" pconfUA)
-    <|> try (uncurry AgentEnv <$> pEnv "agent" pconfAU)
-    <|> try (uncurry BotEnv <$> pEnv "bot" pconfAA)
+    =   try (uncurry BotEnv <$> pEnv "bot" pconfAA)
     <|> try (Universe <$> pAgent "universe" pconfUA)
     <|> try (Agent <$> pAgent "agent" pconfAU)
     <|> try (Bot <$> pOldschoolBot)
@@ -253,7 +256,7 @@ instance Parsable GameObject where
 data Action
   = Combat Name Controls Name Name
   | Compete Controls (Either NameInEnv (Call A A)) (Either NameInEnv (Call A A))
-  | Play Controls (Either NameInEnv (Call U A)) [Either NameInEnv (Call A U)]
+  | Play Controls (Call U A) [Call A U]
   deriving Show
 
 instance Parsable Action where
@@ -268,9 +271,9 @@ instance Parsable Action where
       <*> (nameInEnvParser pconfAA <* P.comma)
       <*> (nameInEnvParser pconfAA <* P.end)
     playParser = Play
-      <$> (P.keyword "compete" *> parser <* P.symbol ":")
-      <*> (nameInEnvParser pconfUA <* P.comma)
-      <*> ((nameInEnvParser pconfAU `sepEndBy` P.comma) <* P.end)
+      <$> (P.keyword "play" *> parser <* P.symbol ":")
+      <*> (callParser pconfUA <* P.comma)
+      <*> ((callParser pconfAU `sepEndBy` P.comma) <* P.end)
 
 pconfAA :: PConf A A
 pconfAA = PConf "@" "$" parser parser
@@ -289,21 +292,17 @@ nameInEnvParser pconf = try (Left <$> nie) <|> (Right <$> callParser pconf) wher
 
 data Setting = Setting
   { bots :: Map Name Bot
+  , botEnvs :: Map Name [Call A A]
   , agents :: Map Name Agent
   , universes :: Map Name Universe
-  , botEnvs :: Map Name [Call A A]
-  , agentEnvs :: Map Name [Call A U]
-  , universeEnvs :: Map Name [Call U A]
   } deriving Show
 
 instance Blockable Setting where
   blockLines setting =
     [ (0, line "Bots" bots)
-    , (0, line "Agents" agents)
-    , (0, line "Universes" universes)
     , (0, line "Bot environments" botEnvs)
-    , (0, line "Agent environments" agentEnvs)
-    , (0, line "Universe environments" universeEnvs) ]
+    , (0, line "Agents" agents)
+    , (0, line "Universes" universes) ]
     where
       line :: String -> (Setting -> Map Name x) -> Text
       line x m = Text.pack $ printf "%s: %s" x $ renderArgs id $ Map.keys $ m setting
@@ -314,12 +313,10 @@ actions objects = [x | Execute x <- objects]
 mergeSettings :: SettingErrorM m => Setting -> Setting -> m Setting
 mergeSettings x y = do
   bs <- mergeMap (DefNameCollision BotT) (bots x) (bots y)
+  bes <- mergeMap (EnvNameCollision BotT) (botEnvs x) (botEnvs y)
   as <- mergeMap (DefNameCollision AgentT) (agents x) (agents y)
   us <- mergeMap (DefNameCollision UniverseT) (universes x) (universes y)
-  bes <- mergeMap (EnvNameCollision BotT) (botEnvs x) (botEnvs y)
-  bas <- mergeMap (EnvNameCollision AgentT) (agentEnvs x) (agentEnvs y)
-  bus <- mergeMap (EnvNameCollision UniverseT) (universeEnvs x) (universeEnvs y)
-  return $ Setting bs as us bes bas bus
+  return $ Setting bs bes as us
   where
     mergeMap :: SettingErrorM m =>
       (Name -> SettingError) -> Map Name x -> Map Name x -> m (Map Name x)
@@ -337,28 +334,20 @@ ensureNoDuplicates t n = void . foldM addToMap Map.empty where
 
 gameToSetting :: SettingErrorM m => [GameObject] -> m Setting
 gameToSetting = foldM addToSetting emptySetting where
-  emptySetting = Setting Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty
-  addToSetting setting@(Setting bs _ _ _ _ _) (Bot b) = do
+  emptySetting = Setting Map.empty Map.empty Map.empty Map.empty
+  addToSetting setting@(Setting bs _ _ _) (Bot b) = do
     (when $ Map.member (defName b) bs) (throwError $ DefNameCollision BotT (defName b))
     return $ setting{bots=Map.insert (defName b) b bs}
-  addToSetting setting@(Setting _ as _ _ _ _) (Agent a) = do
-    (when $ Map.member (defName a) as) (throwError $ DefNameCollision AgentT (defName a))
-    return $ setting{agents=Map.insert (defName a) a as}
-  addToSetting setting@(Setting _ _ us _ _ _) (Universe u) = do
-    (when $ Map.member (defName u) us) (throwError $ DefNameCollision UniverseT (defName u))
-    return $ setting{universes=Map.insert (defName u) u us}
-  addToSetting setting@(Setting _ _ _ env _ _) (BotEnv n calls) = do
+  addToSetting setting@(Setting _ env _ _) (BotEnv n calls) = do
     (when $ Map.member n env) (throwError $ EnvNameCollision BotT n)
     ensureNoDuplicates BotT n calls
     return $ setting{botEnvs=Map.insert n calls env}
-  addToSetting setting@(Setting _ _ _ _ env _) (AgentEnv n calls) = do
-    (when $ Map.member n env) (throwError $ EnvNameCollision AgentT n)
-    ensureNoDuplicates AgentT n calls
-    return $ setting{agentEnvs=Map.insert n calls env}
-  addToSetting setting@(Setting _ _ _ _ _ env) (UniverseEnv n calls) = do
-    (when $ Map.member n env) (throwError $ EnvNameCollision UniverseT n)
-    ensureNoDuplicates UniverseT n calls
-    return $ setting{universeEnvs=Map.insert n calls env}
+  addToSetting setting@(Setting _ _ as _) (Agent a) = do
+    (when $ Map.member (defName a) as) (throwError $ DefNameCollision AgentT (defName a))
+    return $ setting{agents=Map.insert (defName a) a as}
+  addToSetting setting@(Setting _ _ _ us) (Universe u) = do
+    (when $ Map.member (defName u) us) (throwError $ DefNameCollision UniverseT (defName u))
+    return $ setting{universes=Map.insert (defName u) u us}
   addToSetting setting (Execute _) = return setting
 
 printVsHeader :: (Show x, Show y) => Controls -> Call x y -> Call y x -> IO ()
@@ -398,12 +387,12 @@ printMultiResults ctrls call0 r0 calls rs =
       (renderArgs (uncurry renderPlays) (zip calls rs)))
   where renderPlays c r = printf "%s=%s" (callHandle c) (show r) :: String
 
-runCompetition2 :: (Ord x, Ord y, Show x, Show y) =>
+runModalCombat :: (Ord x, Ord y, Show x, Show y) =>
   Controls -> Call x y -> Call y x -> (Name -> Name -> IO (Competition x y)) -> IO ()
-runCompetition2 ctrls call1 call2 getCmap = do
+runModalCombat ctrls call1 call2 getCmap = do
   (printVsHeader ctrls call1 call2)
   cmap <- getCmap (callHandle call1) (callHandle call2)
-  let (r1, r2) = resolve2 (callHandle call1) (callHandle call2) cmap
+  let (r1, r2) = modalCombatResolve (callHandle call1) (callHandle call2) cmap
   (printCompetitionTable ctrls cmap)
   (printKripkeTable ctrls cmap)
   (printVsResults ctrls call1 r1 call2 r2)
@@ -428,6 +417,10 @@ setAOs as os env = (\cds -> env{_cdlist=cds}) <$> newCDlist where
     as'' <- setList ActionT (callName call) as' as
     os'' <- setList OutcomeT (callName call) os' os
     return (def, call{callActions=as'', callOutcomes=os''})
+
+setAOs' :: (IsStatement s, Functor m, MonadError SettingError m) =>
+  [Act s] -> [Out s] -> Def s -> Call (Act s) (Out s) -> m (Call (Act s) (Out s))
+setAOs' = undefined -- TODO
 
 getAOs :: (IsStatement s, Functor m, Applicative m, MonadError SettingError m) =>
   Name -> UncompiledEnv s -> m ([Act s], [Out s])
@@ -505,10 +498,10 @@ executeAction setting (Combat nenv ctrls n1 n2) = do
   call1 <- run $ findCall env n1
   call2 <- run $ findCall env n2
   cenv <- run $ compileEnv env
-  runCompetition2 ctrls call1 call2 (prunedCmap cenv)
+  runModalCombat ctrls call1 call2 (prunedCmap cenv)
   where
     cd = [A "C", A "D"]
-    prunedCmap env = (fmap removeDvars . run) .: competitionMap env
+    prunedCmap env = (fmap removeDvars . run) .: modalCombatMap1 env
     removeDvars = Map.filterWithKey (const . varIsC) . Map.map negateDs
     varIsC (Vs1 _ _ (A "C")) = True
     varIsC (Vs2 _ _ (A "C")) = True
@@ -528,28 +521,21 @@ executeAction setting (Compete ctrls ref1 ref2) = do
   call2' <- run $ findCall env2' (callName call2)
   cenv1 <- run $ compileEnv env1'
   cenv2 <- run $ compileEnv env2'
-  runCompetition2 ctrls call1' call2' (run .: competitionMap2 cenv1 cenv2)
-executeAction setting (Play ctrls uref arefs) = do
-  let uMakeEnv = makeUEnv UniverseT (universes setting) (universeEnvs setting)
-  let aMakeEnv = makeUEnv AgentT (agents setting) (agentEnvs setting)
-  (uCall, uEnv) <- run $ uMakeEnv uref
-  (aCalls, aEnvs) <- run $ unzip <$> mapM aMakeEnv arefs
-  (uas, uos) <- run $ getAOs (callName uCall) uEnv
-  aAOslist <- run $ sequence (zipWith (\c e -> getAOs (callName c) e) aCalls aEnvs)
-  uEnv' <- run $ foldM (\ue (aas, aos) -> setAOs aos aas ue) uEnv aAOslist
-  aEnvs' <- run $ mapM (setAOs uos uas) aEnvs
-  uCall' <- run $ findCall uEnv' (callName uCall)
-  aCalls' <- run $ mapM (\(c, e) -> findCall e (callName c)) (zip aCalls aEnvs')
-  (printMultiHeader ctrls uCall' aCalls')
-  uCEnv <- run $ compileEnv uEnv'
-  aCEnvs <- run $ mapM compileEnv aEnvs'
-  let upair = (callHandle uCall', uCEnv)
-  let apairs = zip (map callHandle aCalls') aCEnvs
-  cmap <- run $ multiCompetition upair apairs
-  (uResult, aResults) <- run (multiCompete upair apairs)
+  runModalCombat ctrls call1' call2' (run .: modalCombatMap cenv1 cenv2)
+executeAction setting (Play ctrls uCall aCalls) = do
+  uDef <- run $ findDef UniverseT (universes setting) (callName uCall)
+  aDefs <- run $ mapM (findDef AgentT (agents setting) . callName) aCalls
+  (uas, uos) <- run $ either (throwError . WrapC) return $ defcallAOlists uDef uCall
+  aCalls' <- run $ mapM (uncurry $ setAOs' uos uas) (zip aDefs aCalls)
+  printMultiHeader ctrls uCall aCalls'
+  let adcs = zip aDefs aCalls'
+  univ <- run $ either (throwError . WrapC) return (compile uDef uCall)
+  agents <- run $ mapM (either (throwError . WrapC) return . uncurry compile) adcs
+  let cmap = multiCompetition univ agents
+  let (uResult, aResults) = multiCompete univ agents
   (printCompetitionTable ctrls cmap)
   (printKripkeTable ctrls cmap)
-  (printMultiResults ctrls uCall uResult aCalls aResults)
+  (printMultiResults ctrls uCall uResult aCalls' aResults)
 
 gameParser :: Parser [GameObject]
 gameParser = (parser `sepEndBy` P.w) <* eof
