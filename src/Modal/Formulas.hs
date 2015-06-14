@@ -199,14 +199,14 @@ mformulaParser reader = buildExpressionParser table term <?> "ModalFormula" wher
       , m_reservedOp "<7>" >> return (diak 7)
       , m_reservedOp "<8>" >> return (diak 8)
       , m_reservedOp "<9>" >> return (diak 9) ] ]
-    , [Infix (m_reservedOp "∧" >> return And) AssocLeft]
-    , [Infix (m_reservedOp "&&" >> return And) AssocLeft]
-    , [Infix (m_reservedOp "∨" >> return  Or) AssocLeft]
-    , [Infix (m_reservedOp "||" >> return  Or) AssocLeft]
-    , [Infix (m_reservedOp "→" >> return Imp) AssocRight]
-    , [Infix (m_reservedOp "->" >> return Imp) AssocRight]
-    , [Infix (m_reservedOp "↔" >> return Iff) AssocRight]
-    , [Infix (m_reservedOp "<->" >> return Iff) AssocRight] ]
+    , [ Infix (m_reservedOp "∧" >> return And) AssocLeft
+      , Infix (m_reservedOp "&&" >> return And) AssocLeft ]
+    , [ Infix (m_reservedOp "∨" >> return  Or) AssocLeft
+      , Infix (m_reservedOp "||" >> return  Or) AssocLeft ]
+    , [ Infix (m_reservedOp "→" >> return Imp) AssocRight
+      , Infix (m_reservedOp "->" >> return Imp) AssocRight ]
+    , [ Infix (m_reservedOp "↔" >> return Iff) AssocRight
+      , Infix (m_reservedOp "<->" >> return Iff) AssocRight ] ]
 
   term = m_parens (mformulaParser reader)
          <|> m_braces (mformulaParser reader)
@@ -268,33 +268,6 @@ maxModalDepthHandler = ModalEvaluator {
 maxModalDepth :: ModalFormula v -> Int
 maxModalDepth = modalEval maxModalDepthHandler
 
--- Propositional evaluation of the modal formula
-
-propositionalEvalHandler :: ModalEvaluator v (Maybe Bool)
-propositionalEvalHandler = ModalEvaluator {
-    handleVal = Just,
-    handleVar = const Nothing,
-    handleNeg = fmap not,
-    handleAnd = liftA2 (&&),
-    handleOr  = liftA2 (||),
-    handleImp = liftA2 (<=),
-    handleIff = liftA2 (==),
-    handleBox = const Nothing,
-    handleDia = const Nothing}
-
-propositionalEval :: ModalFormula v -> Maybe Bool
-propositionalEval = modalEval propositionalEvalHandler
-
--- Evaluate the modal formula assuming the soundness of the system
-
-evalWithSoundnessHandler :: ModalEvaluator v (Maybe Bool)
-evalWithSoundnessHandler = propositionalEvalHandler{
-    handleBox = \x -> if x == Just False then Just False else Nothing,
-    handleDia = \x -> if x == Just True then Just True else Nothing}
-
-evalWithSoundness :: ModalFormula v -> Maybe Bool
-evalWithSoundness = modalEval evalWithSoundnessHandler
-
 -- How to simplify modal formulas:
 mapFormulaOutput :: (Bool -> Bool) -> ModalFormula v -> ModalFormula v
 mapFormulaOutput f formula = g (f False) (f True)
@@ -328,7 +301,6 @@ simplifyDia :: ModalFormula v -> ModalFormula v
 simplifyDia f@(Val False) = f
 simplifyDia x = Dia x
 
-
 simplifyHandler :: ModalEvaluator v (ModalFormula v)
 simplifyHandler =  ModalEvaluator {
     handleVal = Val,
@@ -339,13 +311,12 @@ simplifyHandler =  ModalEvaluator {
     handleImp = simplifyBinaryOperator Imp (<=),
     handleIff = simplifyBinaryOperator Iff (==),
     handleBox = simplifyBox,
-    handleDia = simplifyDia}
+    handleDia = simplifyDia }
 
 simplify :: ModalFormula v -> ModalFormula v
 simplify = modalEval simplifyHandler
 
 -- GL Eval in standard model
-
 glEvalHandler :: ModalEvaluator v [Bool]
 glEvalHandler = ModalEvaluator {
     handleVal = repeat,
@@ -356,7 +327,7 @@ glEvalHandler = ModalEvaluator {
     handleImp = zipWith (<=),
     handleIff = zipWith (==),
     handleBox = scanl (&&) True,
-    handleDia = scanl (||) False}
+    handleDia = scanl (||) False }
 
 -- The reason we don't combine this with the above is because that would induce
 -- an Ord constraint on v unnecessarily.
@@ -376,7 +347,6 @@ glEval = modalEval glEvalHandler
 
 glEvalStandard :: ModalFormula v -> Bool
 glEvalStandard f = glEval f !! maxModalDepth f
-
 
 simplifiedMaxDepth :: ModalFormula v -> Int
 simplifiedMaxDepth formula =
