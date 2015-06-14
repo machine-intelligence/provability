@@ -538,7 +538,7 @@ executeAction setting (Play ctrls uCall aCalls) = do
   (printMultiResults ctrls uCall uResult aCalls' aResults)
 
 gameParser :: Parser [GameObject]
-gameParser = (parser `sepEndBy` P.w) <* eof
+gameParser = P.w *> (parser `sepEndBy` P.w) <* eof
 
 parseFile :: FilePath -> IO [GameObject]
 parseFile path = runFile (parse gameParser path) path
