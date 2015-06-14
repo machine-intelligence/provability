@@ -42,16 +42,20 @@ instance Monad ModalFormula where
     handleVal = Val, handleVar = f, handleNeg = Neg,
     handleAnd = And, handleOr  = Or, handleImp = Imp, handleIff = Iff,
     handleBox = Box, handleDia = Dia } m
+
 instance Applicative ModalFormula where
   pure = return
   (<*>) = ap
+
 instance Functor ModalFormula where
   fmap f m = m >>= (Var . f)
+
 instance Foldable ModalFormula where
   foldMap acc = modalEval ModalEvaluator{
       handleVal = const mempty, handleVar = acc, handleNeg = id,
       handleAnd = (<>), handleOr = (<>), handleImp = (<>), handleIff = (<>),
       handleBox = id, handleDia = id }
+
 instance Traversable ModalFormula where
   traverse f = modalEval mevaler where
     mevaler = ModalEvaluator {
@@ -142,8 +146,8 @@ data ShowFormula = ShowFormula {
   diaSymbol :: String
   } deriving (Eq, Ord, Read, Show)
 
-showFormula :: Show v => ShowFormula -> ModalFormula v -> String
-showFormula sf = flip (showsFormula (0 :: Int)) "" where
+showFormula :: Show v => ShowFormula -> Int -> ModalFormula v -> ShowS
+showFormula sf = showsFormula where
   showsFormula p f = case f of
     Val l -> showString $ if l then topSymbol sf else botSymbol sf
     Var v -> showString $ show v
@@ -158,13 +162,8 @@ showFormula sf = flip (showsFormula (0 :: Int)) "" where
   showUnary o i x = showString o . showsFormula i x
   showBinary o l x r y = showsFormula l x . padded o . showsFormula r y
 
-showUnicode :: Show v => ModalFormula v -> String
-showUnicode = showFormula (ShowFormula "⊤" "⊥" "¬" "∧" "∨" "→" "↔" "□" "◇")
-
-showAscii :: Show v => ModalFormula v -> String
-showAscii = showFormula (ShowFormula "T" "F" "~" "&&" "||" "->" "<->" "[]" "<>")
-
-instance Show v => Show (ModalFormula v) where show = showUnicode
+instance Show v => Show (ModalFormula v) where
+  showsPrec = showFormula (ShowFormula "⊤" "⊥" "¬" "∧" "∨" "→" "↔" "□" "◇")
 
 --------------------------------------------------------------------------------
 
