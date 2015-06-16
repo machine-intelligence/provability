@@ -5,7 +5,7 @@ module Modal.Utilities
   , ($>)
   , (<$$>)
   , Name
-  , Void
+  , Value
   , enumerate
   , alter
   , every
@@ -17,7 +17,6 @@ module Modal.Utilities
   , runFile
   ) where
 import Prelude hiding (readFile)
-import Control.Applicative
 import Control.Monad (foldM)
 import Data.Text (Text)
 import Data.Text.IO (readFile)
@@ -44,12 +43,7 @@ x $> y = x *> pure y
 (<$$>) = flip (<$>)
 
 type Name = String
-
-data Void
-instance Eq Void
-instance Ord Void
-instance Read Void
-instance Show Void
+type Value = String
 
 enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)

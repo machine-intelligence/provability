@@ -1,6 +1,5 @@
 module Modal.Programming where
 import Prelude hiding ((.), id)
-import Control.Applicative
 import Control.Arrow
 import Control.Category
 import Data.Maybe

@@ -21,8 +21,6 @@ instance (Ord x, Parsable x) => Parsable (Set x) where
   parser = setParser parser
 instance Parsable a => Parsable (Identity a) where
   parser = Identity <$> parser
-instance Parsable Void where
-  parser = fail "Cannot instantiate the Void."
 
 listParser :: Parser x -> Parser [x]
 listParser p = brackets $ sepEndBy p comma
@@ -81,8 +79,8 @@ braces = between (symbol "{") (symbol "}")
 name :: Parser Name
 name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
 
-anyname :: Parser Name
-anyname = identifier (satisfy isNameChar) (satisfy isNameChar)
+value :: Parser Value
+value = identifier (satisfy isNameChar) (satisfy isNameChar)
 
 isNameFirstChar, isNameChar :: Char -> Bool
 isNameFirstChar = (||) <$> isLetter <*> (`elem` ("-_'" :: String))

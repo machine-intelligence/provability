@@ -4,8 +4,6 @@ import Control.Arrow ((***))
 import Control.Monad (ap)
 import Data.List
 import Data.Monoid
-import Data.Foldable hiding (find, maximum)
-import Data.Traversable
 import Data.Maybe
 import Data.Map (Map)
 import qualified Data.Map as M

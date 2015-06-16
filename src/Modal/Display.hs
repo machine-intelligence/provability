@@ -3,7 +3,7 @@ module Modal.Display where
 import Control.Arrow (first)
 import Data.List (transpose, intercalate)
 import Data.Map hiding (map, foldr)
-import Data.Monoid ((<>), mconcat)
+import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.IO as Text.IO

@@ -26,6 +26,42 @@ import qualified Data.Set as Set
 import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
+-- TODO: move elsewhere
+
+data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
+
+renderVal :: (Show a, Show o) => Val a o -> String
+renderVal (Number i) = show i
+renderVal (Action a) = show a
+renderVal (Outcome o) = show o
+
+typeOf :: Val a o -> ValType
+typeOf (Number _) = NumberT
+typeOf (Action _) = ActionT
+typeOf (Outcome _) = OutcomeT
+
+typesMatch :: Val a o -> Val a o -> Bool
+typesMatch x y = typeOf x == typeOf y
+
+-------------------------------------------------------------------------------
+
+-- TODO: Move elsewhere.
+data PConf a o = PConf
+  { actSym :: String
+  , outSym :: String
+  , parseA :: Parser a
+  , parseO :: Parser o }
+
+numSym :: PConf a o -> String
+numSym = const "#"
+
+parseAref :: PConf a o -> Parser (Ref a)
+parseAref = refParser . parseA
+
+parseOref :: PConf a o -> Parser (Ref o)
+parseOref = refParser . parseO
+
+-------------------------------------------------------------------------------
 
 type CompileErrorM m = (Applicative m, MonadError CompileError m)
 
@@ -58,6 +94,28 @@ instance Show CompileError where
   show (CodeCallListConflict n x as bs) =
     printf "code/call %s conflict for %s (%s/%s)"
       (show x) (show n) (List.intercalate "," as) (List.intercalate "," bs)
+
+-- TODO: Remove or relocate.
+class Bitraversable v => AgentVar v where
+  subagentsIn :: v a o -> Set Name
+  subagentsIn = const Set.empty
+  makeAgentVarParser :: Parser a -> Parser o -> Parser (v a o)
+
+subagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Set Name
+subagents = Set.unions . map fSubagents . Map.elems where
+  fSubagents = Set.unions . map subagentsIn . F.allVars
+
+hasNoSubagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Bool
+hasNoSubagents = Set.null . subagents
+
+voidToFormula :: (AgentVar v, Monad m) =>
+  v (Relation (Ref Void)) (Relation (Ref Void)) -> m (ModalFormula (v a o))
+voidToFormula _ = fail "Where did you even get this element of the Void?"
+
+evalVar :: (Bitraversable v, Contextual a o m) =>
+  v (Relation (Ref a)) (Relation (Ref o)) -> m (ModalFormula (v a o))
+evalVar v = relToFormula <$> bitraverse (mapM getA) (mapM getO) v
+
 
 -------------------------------------------------------------------------------
 
