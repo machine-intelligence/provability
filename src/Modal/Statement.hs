@@ -1,5 +1,4 @@
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -8,113 +7,20 @@
 module Modal.Statement where
 import Prelude hiding (readFile, sequence, mapM, foldr1, concat, concatMap)
 import Control.Applicative
-import Control.Monad.Except hiding (mapM, sequence)
-import Data.Bifunctor
-import Data.Bitraversable
-import Data.Maybe (fromMaybe)
-import Data.Foldable
-import Modal.CompileContext
+import Modal.CompilerBase
 import Modal.Formulas (ModalFormula)
 import Modal.Parser
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Expr
-import Text.Parsec.Text
 import Text.Printf (printf)
-import qualified Data.List as List
 import qualified Modal.Formulas as F
-
--------------------------------------------------------------------------------
-
-data Relation a
-  = Equals a
-  | In [a]
-  | NotEquals a
-  | NotIn [a]
-  deriving (Eq, Ord, Read, Functor)
-
-instance Show a => Show (Relation a) where
-  show (Equals v) = "=" ++ show v
-  show (In v) = "∈{" ++ List.intercalate "," (map show v) ++ "}"
-  show (NotEquals v) = "≠" ++ show v
-  show (NotIn v) = "∉{" ++ List.intercalate "," (map show v) ++ "}"
-
-instance Foldable Relation where
-  foldMap addM (Equals a) = addM a
-  foldMap addM (In as) = foldMap addM as
-  foldMap addM (NotEquals a) = addM a
-  foldMap addM (NotIn as) = foldMap addM as
-
-instance Traversable Relation where
-  traverse f (Equals a) = Equals <$> f a
-  traverse f (In as) = In <$> sequenceA (map f as)
-  traverse f (NotEquals a) = NotEquals <$> f a
-  traverse f (NotIn as) = NotIn <$> sequenceA (map f as)
-
-instance (Ord a, Parsable a) => Parsable (Relation a) where
-  parser = relationParser parser
-
-relationParser :: Parser x -> Parser (Relation x)
-relationParser p = go where
-  go =   try (Equals <$> (sEquals *> p))
-     <|> try (NotEquals <$> (sNotEquals *> p))
-     <|> try (In <$> (sIn *> set))
-     <|> NotIn <$> (sNotIn *> set)
-  sEquals = void sym where
-    sym =   try (symbol "=")
-        <|> try (symbol "==")
-        <|> try (keyword "is")
-        <?> "an equality"
-  sNotEquals = void sym where
-    sym =   try (symbol "≠")
-        <|> try (symbol "!=")
-        <|> try (symbol "/=")
-        <|> try (keyword "isnt")
-        <?> "a disequality"
-  sIn = void sym where
-    sym =   try (symbol "∈")
-        <|> try (keyword "in")
-        <?> "a membership test"
-  sNotIn = void sym where
-    sym =   try (symbol "∉")
-        <|> try (keyword "notin")
-        <?> "an absence test"
-  set = braces $ sepEndBy p comma
-
-relToMentions :: Relation a -> [a]
-relToMentions (Equals a) = [a]
-relToMentions (In as) = as
-relToMentions (NotEquals a) = [a]
-relToMentions (NotIn as) = as
-
-relToFormula :: Bitraversable v => v (Relation a) (Relation o) -> ModalFormula (v a o)
-relToFormula = bisequence . bimap toF toF where
-  toF (Equals a) = F.Var a
-  toF (In []) = F.Val False
-  toF (In as) = foldr1 F.Or $ map F.Var as
-  toF (NotEquals a) = F.Neg $ toF (Equals a)
-  toF (NotIn []) = F.Val True
-  toF (NotIn as) = F.Neg $ toF (In as)
-
--------------------------------------------------------------------------------
-
-data ActionClaim = ActionClaim Name (Maybe Name) (Relation (Ref Value))
-  deriving (Eq, Ord, Read)
-
-instance Show ActionClaim where
-  show (ActionClaim n o r) = printf "%s(%s)%s" n (fromMaybe "" o) (show r)
-
-instance Parsable ActionClaim where
-  parser = ActionClaim <$>
-             name <*>
-             optional (parens name) <*>
-             relationParser (refParser value)
 
 -------------------------------------------------------------------------------
 
 data Statement
   = Val Bool
-  | Var ActionClaim
+  | Var ParsedClaim
   | Neg Statement
   | And Statement Statement
   | Or Statement Statement
@@ -233,20 +139,20 @@ instance Parsable Statement where
       afterSym s = Possible <$> (symbol s  *> option (Lit 0) parser)
       syms = ["◇", "Possible", "Dia", "Diamond"]
 
-actionClaimsMade :: Statement -> [ActionClaim]
-actionClaimsMade statement = case statement of
+claimsParsed :: Statement -> [ParsedClaim]
+claimsParsed statement = case statement of
   Val _ -> []
   Var a -> [a]
-  Neg s -> actionClaimsMade s
-  And x y -> actionClaimsMade x ++ actionClaimsMade y
-  Or x y -> actionClaimsMade x ++ actionClaimsMade y
-  Imp x y -> actionClaimsMade x ++ actionClaimsMade y
-  Iff x y -> actionClaimsMade x ++ actionClaimsMade y
+  Neg s -> claimsParsed s
+  And x y -> claimsParsed x ++ claimsParsed y
+  Or x y -> claimsParsed x ++ claimsParsed y
+  Imp x y -> claimsParsed x ++ claimsParsed y
+  Iff x y -> claimsParsed x ++ claimsParsed y
   Consistent _ -> []
-  Provable _ s -> actionClaimsMade s
-  Possible _ s -> actionClaimsMade s
+  Provable _ s -> claimsParsed s
+  Possible _ s -> claimsParsed s
 
-type HandleVar v m = ActionClaim -> m (ModalFormula v)
+type HandleVar v m = ParsedClaim -> m (ModalFormula v)
 
 compileStatement :: MonadCompile m => HandleVar v m -> Statement -> m (ModalFormula v)
 compileStatement handleVar stm = case stm of

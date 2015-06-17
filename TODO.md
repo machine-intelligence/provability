@@ -8,3 +8,4 @@
    are as follows: run "main" in "Games.hs", and run "modalcombat" on
    "agents/standard.cd". More tests would be nice though.
 5. Grep around for TODOs
+6. We can probably remove the bifunctors dependency nowadays.

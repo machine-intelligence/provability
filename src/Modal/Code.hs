@@ -7,11 +7,11 @@ import Control.Applicative
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence, state)
 import Data.Map (Map)
-import Data.Maybe (mapMaybe, maybeToList, fromMaybe)
+import Data.Maybe (mapMaybe, maybeToList)
 import Data.Monoid ((<>))
 import Data.Foldable
 import Data.Traversable
-import Modal.CompileContext
+import Modal.CompilerBase
 import Modal.Display
 import Modal.Formulas (ModalFormula, (%^), (%|))
 import Modal.Parser
@@ -30,14 +30,11 @@ import qualified Modal.Formulas as F
 -------------------------------------------------------------------------------
 
 data CodeConfig = CodeConfig
-  { actionString :: String
-  , actionsString :: String
-  , outcomeString :: String
-  , outcomesString :: String
+  { actionKw :: String
+  , actionsKw :: String
+  , outcomeKw :: String
+  , outcomesKw :: String
   } deriving (Eq, Ord, Read, Show)
-
-defaultCodeConfig :: CodeConfig
-defaultCodeConfig = CodeConfig "action" "actions" "outcome" "outcomes"
 
 -------------------------------------------------------------------------------
 
@@ -195,38 +192,14 @@ codeFragmentParser conf = pFrag where
   returnNothing :: Parser CodeFragment
   returnThing = symbol "return " *> (Return . Just <$> refParser value)
   returnNothing = symbol "return" $> Return Nothing
-  action = actionString conf
-  outcome = outcomeString conf
-  actions = actionsString conf
-  outcomes = outcomesString conf
+  action = actionKw conf
+  outcome = outcomeKw conf
+  actions = actionsKw conf
+  outcomes = outcomesKw conf
   varname = char '&' *> name
 
-data AgentClaim = AgentClaim
-  { claimNameIs :: Name
-  , claimPlayedVs :: Maybe Name
-  , claimBehaviorT :: Maybe ClaimType
-  , claimAgentPlays :: Value
-  } deriving (Eq, Ord, Read)
-
-instance Show AgentClaim where
-  show (AgentClaim n o t v) = printf "%s(%s)=%s%s" n (fromMaybe "" o) showt v where
-    showt = maybe ("" :: String) (printf "%s " . tSymbol) t
-    tSymbol ActionT = '@'
-    tSymbol OutcomeT = '$'
-
-compileActionClaim :: MonadCompile m => ActionClaim -> m (ModalFormula AgentClaim)
-compileActionClaim (ActionClaim n o rel) = mapM makeClaim (toF rel) where
-  makeClaim :: MonadCompile m => Ref Value -> m AgentClaim
-  makeClaim ref = uncurry (AgentClaim n o) <$> lookupClaim ref
-  toF (Equals a) = F.Var a
-  toF (In []) = F.Val False
-  toF (In as) = foldr1 F.Or $ map F.Var as
-  toF (NotEquals a) = F.Neg $ toF (Equals a)
-  toF (NotIn []) = F.Val True
-  toF (NotIn as) = F.Neg $ toF (In as)
-
 compileCodeFragment :: MonadCompile m =>
-  CodeFragment -> m (PartialProgram Value AgentClaim)
+  CodeFragment -> m (PartialProgram Value CompiledClaim)
 compileCodeFragment code = case code of
   ForA n r x -> loop (withA n) x =<< compileRange (gets actionList) lookupA r
   ForO n r x -> loop (withO n) x =<< compileRange (gets outcomeList) lookupO r
@@ -234,7 +207,7 @@ compileCodeFragment code = case code of
   LetN n x -> compileExpr x >>= modify . withN n >> return id
   If s block -> compileCodeFragment (IfElse s block [Pass])
   IfElse s tblock eblock -> do
-    cond <- compileStatement compileActionClaim s
+    cond <- compileStatement compileClaim s
     thens <- mapM compileCodeFragment tblock
     elses <- mapM compileCodeFragment eblock
     let yes = foldr1 (.) thens
@@ -272,14 +245,14 @@ codeMapParser = ActionMap . Map.fromList <$> (assignment `sepEndBy` comma) where
   assignment = (,) <$> (value <* pIff) <*> parser
   pIff = void $ choice [try $ symbol "↔", try $ symbol "<->", try $ keyword "iff"]
 
-compileCode :: MonadCompile m => Code -> m (ModalProgram Value AgentClaim)
+compileCode :: MonadCompile m => Code -> m (ModalProgram Value CompiledClaim)
 compileCode (Code frags) = do
   prog <- foldM (\f c -> (f .) <$> compileCodeFragment c) id frags
   dflt <- defaultAction
   return $ prog (F.Val . (dflt ==))
 compileCode (ActionMap a2smap) = do
   let a2slist = Map.toList a2smap
-  formulas <- mapM (compileStatement compileActionClaim . snd) a2slist
+  formulas <- mapM (compileStatement compileClaim . snd) a2slist
   let a2flist = zip (map fst a2slist) formulas
   return $ \a -> let Just f = List.lookup a a2flist in f
 
@@ -311,24 +284,24 @@ outcomesMentioned (Code frags) = concatMap fragRets frags where
   fragRets Pass = []
 
 -- Note: Code not dead; just not yet used.
-claimsMade :: Code -> [ActionClaim]
-claimsMade (ActionMap m) = concatMap actionClaimsMade $ Map.elems m
+claimsMade :: Code -> [ParsedClaim]
+claimsMade (ActionMap m) = concatMap claimsParsed $ Map.elems m
 claimsMade (Code frags) = concatMap fragClaims frags where
   fragClaims (ForA _ _ fs) = concatMap fragClaims fs
   fragClaims (ForO _ _ fs) = concatMap fragClaims fs
   fragClaims (ForN _ _ fs) = concatMap fragClaims fs
-  fragClaims (If s fs) = actionClaimsMade s ++ concatMap fragClaims fs
+  fragClaims (If s fs) = claimsParsed s ++ concatMap fragClaims fs
   fragClaims (IfElse s fs gs) =
-    actionClaimsMade s ++ concatMap fragClaims fs ++ concatMap fragClaims gs
+    claimsParsed s ++ concatMap fragClaims fs ++ concatMap fragClaims gs
   fragClaims (LetN _ _) = []
   fragClaims (Return _) = []
   fragClaims Pass = []
 
 -------------------------------------------------------------------------------
 
-type CompiledAgent = Map Value (ModalFormula AgentClaim)
+type CompiledAgent = Map Value (ModalFormula CompiledClaim)
 
-codeToProgram :: CompileErrorM m => Context -> Code -> m CompiledAgent
+codeToProgram :: CompileErrorM m => CompileContext -> Code -> m CompiledAgent
 codeToProgram context code = do
   (prog, state) <- runStateT (compileCode code) context
   return $ Map.fromList [(a, prog a) | a <- actionList state]
