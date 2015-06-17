@@ -31,7 +31,7 @@ data Relation a
   | In [a]
   | NotEquals a
   | NotIn [a]
-  deriving (Eq, Ord, Functor)
+  deriving (Eq, Ord, Read, Functor)
 
 instance Show a => Show (Relation a) where
   show (Equals v) = "=" ++ show v
@@ -99,7 +99,7 @@ relToFormula = bisequence . bimap toF toF where
 -------------------------------------------------------------------------------
 
 data ActionClaim = ActionClaim Name (Maybe Name) (Relation (Ref Value))
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Read)
 
 instance Show ActionClaim where
   show (ActionClaim n o r) = printf "%s(%s)%s" n (fromMaybe "" o) (show r)
@@ -124,8 +124,6 @@ data Statement
   | Provable (Ref Int) Statement
   | Possible (Ref Int) Statement
   deriving Eq
-
-type HandleVar v m = ActionClaim -> m (ModalFormula v)
 
 data ShowStatement = ShowStatement {
   topSymbol :: String,
@@ -235,8 +233,23 @@ instance Parsable Statement where
       afterSym s = Possible <$> (symbol s  *> option (Lit 0) parser)
       syms = ["◇", "Possible", "Dia", "Diamond"]
 
-evalStatement :: MonadCompile m => HandleVar v m -> Statement -> m (ModalFormula v)
-evalStatement handleVar stm = case stm of
+actionClaimsMade :: Statement -> [ActionClaim]
+actionClaimsMade statement = case statement of
+  Val _ -> []
+  Var a -> [a]
+  Neg s -> actionClaimsMade s
+  And x y -> actionClaimsMade x ++ actionClaimsMade y
+  Or x y -> actionClaimsMade x ++ actionClaimsMade y
+  Imp x y -> actionClaimsMade x ++ actionClaimsMade y
+  Iff x y -> actionClaimsMade x ++ actionClaimsMade y
+  Consistent _ -> []
+  Provable _ s -> actionClaimsMade s
+  Possible _ s -> actionClaimsMade s
+
+type HandleVar v m = ActionClaim -> m (ModalFormula v)
+
+compileStatement :: MonadCompile m => HandleVar v m -> Statement -> m (ModalFormula v)
+compileStatement handleVar stm = case stm of
   Val v -> return $ F.Val v
   Var v -> handleVar v
   Neg x -> F.Neg <$> rec x
@@ -247,4 +260,4 @@ evalStatement handleVar stm = case stm of
   Consistent v -> F.incon <$> lookupN v
   Provable r x -> F.boxk <$> lookupN r <*> rec x
   Possible r x -> F.diak <$> lookupN r <*> rec x
-  where rec = evalStatement handleVar
+  where rec = compileStatement handleVar

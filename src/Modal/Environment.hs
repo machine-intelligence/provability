@@ -18,6 +18,29 @@ import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 
+-------------------------------------------------------------------------------
+
+-- TODO: Remove or relocate.
+class Bitraversable v => AgentVar v where
+  subagentsIn :: v a o -> Set Name
+  subagentsIn = const Set.empty
+  makeAgentVarParser :: Parser a -> Parser o -> Parser (v a o)
+
+subagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Set Name
+subagents = Set.unions . map fSubagents . Map.elems where
+  fSubagents = Set.unions . map subagentsIn . F.allVars
+
+hasNoSubagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Bool
+hasNoSubagents = Set.null . subagents
+
+voidToFormula :: (AgentVar v, Monad m) =>
+  v (Relation (Ref Void)) (Relation (Ref Void)) -> m (ModalFormula (v a o))
+voidToFormula _ = fail "Where did you even get this element of the Void?"
+
+evalVar :: (Bitraversable v, Contextual a o m) =>
+  v (Relation (Ref a)) (Relation (Ref o)) -> m (ModalFormula (v a o))
+evalVar v = relToFormula <$> bitraverse (mapM getA) (mapM getO) v
+
 --------------------------------------------------------------------------------
 -- The environment type. It holds all of the agents on a given side of combat.
 -- Agents in an Env A O have action type A and consider opponents with option

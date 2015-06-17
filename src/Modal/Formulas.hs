@@ -250,6 +250,7 @@ instance Read v => Read (ModalFormula v) where
 
 --------------------------------------------------------------------------------
 
+-- Note: Code not dead; just not yet used.
 isModalized :: ModalFormula v -> Bool
 isModalized = modalEval ModalEvaluator {
   handleVar = const False, handleVal = const True, handleNeg = id,

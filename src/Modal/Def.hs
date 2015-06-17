@@ -10,250 +10,172 @@ import Control.Applicative
 import Control.Monad.Except hiding (mapM, sequence)
 import Data.Map (Map)
 import Data.Maybe
-import Data.Set (Set)
+import Data.Set ((\\))
 import Data.Traversable
 import Modal.Code
+import Modal.CompileContext
 import Modal.Display
 import Modal.Parser
-import Modal.Statement
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
+import Text.Read (readMaybe)
 import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
--- TODO: move elsewhere
 
-data Val a o = Number Int | Action a | Outcome o deriving (Eq, Ord, Read, Show)
-
-renderVal :: (Show a, Show o) => Val a o -> String
-renderVal (Number i) = show i
-renderVal (Action a) = show a
-renderVal (Outcome o) = show o
-
-typeOf :: Val a o -> ValType
-typeOf (Number _) = NumberT
-typeOf (Action _) = ActionT
-typeOf (Outcome _) = OutcomeT
-
-typesMatch :: Val a o -> Val a o -> Bool
-typesMatch x y = typeOf x == typeOf y
-
--------------------------------------------------------------------------------
-
--- TODO: Move elsewhere.
-data PConf a o = PConf
-  { actSym :: String
-  , outSym :: String
-  , parseA :: Parser a
-  , parseO :: Parser o }
-
-numSym :: PConf a o -> String
-numSym = const "#"
-
-parseAref :: PConf a o -> Parser (Ref a)
-parseAref = refParser . parseA
-
-parseOref :: PConf a o -> Parser (Ref o)
-parseOref = refParser . parseO
-
--------------------------------------------------------------------------------
-
-type CompileErrorM m = (Applicative m, MonadError CompileError m)
-
-data CompileError
-  = WrapEvalErr EvalError
-  | UnknownArgs Name (Set Name)
-  | ArgMismatch Name Name ValType ValType
-  | ArgMissing Name Name
-  | TooManyArgs Name
-  | NoList Name ValType
-  | DefCodeListConflict Name ValType [String] [String]
-  | CodeCallListConflict Name ValType [String] [String]
-  deriving (Eq, Ord)
-
-instance Show CompileError where
-  show (WrapEvalErr e) = show e
-  show (TooManyArgs n) =
-    printf "too many arguments given to %s" (show n)
-  show (UnknownArgs n as) =
-    printf "unknown args given to %s: %s" n (List.intercalate "," $ Set.toAscList as)
-  show (ArgMismatch n a x y) =
-    printf "type mismatch for arg %s of %s: needed %s, got %s" a n (show x) (show y)
-  show (ArgMissing n a) =
-    printf "missing arg %s of %s" a n
-  show (NoList n x) =
-    printf "%s list missing for %s" (show x) (show n)
-  show (DefCodeListConflict n x as bs) =
-    printf "def/code %s conflict for %s (%s/%s)"
-      (show x) (show n) (List.intercalate "," as) (List.intercalate "," bs)
-  show (CodeCallListConflict n x as bs) =
-    printf "code/call %s conflict for %s (%s/%s)"
-      (show x) (show n) (List.intercalate "," as) (List.intercalate "," bs)
-
--- TODO: Remove or relocate.
-class Bitraversable v => AgentVar v where
-  subagentsIn :: v a o -> Set Name
-  subagentsIn = const Set.empty
-  makeAgentVarParser :: Parser a -> Parser o -> Parser (v a o)
-
-subagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Set Name
-subagents = Set.unions . map fSubagents . Map.elems where
-  fSubagents = Set.unions . map subagentsIn . F.allVars
-
-hasNoSubagents :: AgentVar v => Map a (ModalFormula (v a o)) -> Bool
-hasNoSubagents = Set.null . subagents
-
-voidToFormula :: (AgentVar v, Monad m) =>
-  v (Relation (Ref Void)) (Relation (Ref Void)) -> m (ModalFormula (v a o))
-voidToFormula _ = fail "Where did you even get this element of the Void?"
-
-evalVar :: (Bitraversable v, Contextual a o m) =>
-  v (Relation (Ref a)) (Relation (Ref o)) -> m (ModalFormula (v a o))
-evalVar v = relToFormula <$> bitraverse (mapM getA) (mapM getO) v
-
-
--------------------------------------------------------------------------------
-
-type Args a o = [(Name, Maybe (Val a o))]
-
-data Def s = Def
-  { defArgs :: Args (Act s) (Out s)
-  , defActions :: [Act s]
-  , defOutcomes :: [Out s]
+data Def = Def
+  { defArgs :: [(Name, VarType, Maybe VarVal)]
+  , defActions :: [Value]
+  , defOutcomes :: [Value]
   , defName :: Name
-  , defCode :: Code s }
+  , defCode :: Code
+  } deriving Eq
 
-instance Show (Def s) where show = defName
+instance Show Def where show = defName
 
-defheadParser :: PConf (Act s) (Out s) -> Parser (Code s -> Def s)
-defheadParser pconf = do
-  n <- anyname
+defheadParser :: CodeConfig -> Parser (Code -> Def)
+defheadParser conf = do
+  n <- value
   ps <- option [] (try argsParser)
-  let aorder = orderParser (actSym pconf) (parseA pconf)
-  let oorder = orderParser (outSym pconf) (parseO pconf)
+  let aorder = orderParser (actionsString conf)
+  let oorder = orderParser (outcomesString conf)
   (as, os) <- anyComboOf aorder oorder
   return $ Def ps (fromMaybe [] as) (fromMaybe [] os) n
   where
     argsParser = parens (arg `sepBy` comma) where
       arg = try num <|> try act <|> try out
-      param sym p = symbol sym *> ((,) <$> name <*> optional (symbol "=" *> p))
-      num = param (numSym pconf) (Number <$> parser)
-      act = param (actSym pconf) (Action <$> parseA pconf)
-      out = param (outSym pconf) (Outcome <$> parseO pconf)
-    orderParser sym p = symbol sym *> try acts <|> try dunno where
-      acts = brackets (p `sepEndBy` comma)
+      param kwd t p = (,,) <$>
+        (keyword kwd *> name) <*>
+        return t <*>
+        optional (symbol "=" *> p)
+      num = param "number" NumberT (Number <$> parser)
+      act = param (actionString conf) (ClaimT ActionT) (Action <$> value)
+      out = param (outcomeString conf) (ClaimT OutcomeT) (Outcome <$> value)
+    orderParser kwd = keyword kwd *> try acts <|> try dunno where
+      acts = brackets (value `sepEndBy` comma)
       dunno = brackets (string "...") $> []
 
 -------------------------------------------------------------------------------
 
-data Call a o = Call
+data Call = Call
   { callName :: Name
-  , callArgs :: [Val a o]
-  , callKwargs :: Map Name (Val a o)
-  , callActions :: [a]
-  , callOutcomes :: [o]
+  , callArgs :: [Value]
+  , callKwargs :: Map Name Value
+  , callActions :: [Value]
+  , callOutcomes :: [Value]
   , callAlias :: Maybe Name
   } deriving (Eq, Ord)
 
-instance (Show a, Show o) => Show (Call a o) where
+instance Show Call where
   show (Call n args kwargs _ _ alias) = n ++ paramstr ++ aliasstr where
     aliasstr = maybe "" (printf " as %s") alias
     paramstr = printf "(%s%s%s)" argstr mid kwargstr
-    argstr = renderArgs renderVal args
+    argstr = renderArgs id args
     mid = if List.null args || Map.null kwargs then "" else "," :: String
     kwargstr = renderArgs (uncurry showKwarg) (Map.toAscList kwargs)
-    showKwarg k v = printf "%s=%s" k (renderVal v)
+    showKwarg k v = printf "%s=%s" k v
 
-callHandle :: (Show x, Show y) => Call x y -> Name
+callHandle :: Call -> Name
 callHandle call = fromMaybe (show call) (callAlias call)
 
-callParser :: PConf x y -> Parser (Call x y)
-callParser pconf = do
-  n <- anyname
+callParser :: Parser Call
+callParser = do
+  n <- value
   (args, kwargs) <- option ([], Map.empty) (try argsParser)
-  as <- orderParser (actSym pconf) (parseA pconf)
-  os <- orderParser (outSym pconf) (parseO pconf)
-  alias <- optional (try (keyword "as" *> anyname))
+  as <- option [] valuesParser
+  os <- option [] valuesParser
+  alias <- optional (try (keyword "as" *> value))
   return $ Call n args kwargs as os alias
   where
-    orderParser sym p = option [] $ try (symbol sym *> orderP) where
-      orderP = try (listParser p) <|> (brackets (string "...") $> [])
+    valuesParser = try (brackets (string "...") $> []) <|> listParser value
     argsParser = parens argsThenKwargs where
       argsThenKwargs = (,) <$> allArgs <*> allKwargs
-      allArgs = arg `sepEndBy` comma
+      allArgs = value `sepEndBy` comma
       allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
-      kwarg = (,) <$> name <*> (symbol "=" *> arg)
-      arg = try num <|> try act <|> try out <?> "an argument"
-      num = symbol (numSym pconf) *> (Number <$> parser)
-      act = symbol (actSym pconf) *> (Action <$> parseA pconf)
-      out = symbol (outSym pconf) *> (Outcome <$> parseO pconf)
+      kwarg = (,) <$> name <*> (symbol "=" *> value)
 
 -------------------------------------------------------------------------------
 
-defcallAOlists :: (IsStatement s, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m ([Act s], [Out s])
-defcallAOlists def call = do
-  let (codeAs, codeOs) = (getActs (defCode def), getOuts (defCode def))
-  let (defAs, defOs) = (defActions def, defOutcomes def)
-  let (callAs, callOs) = (callActions call, callOutcomes call)
-  as <- ensureRisL (ccerr ActionT) callAs =<< ensureRinL (dcerr ActionT) defAs codeAs
-  os <- ensureRisL (ccerr OutcomeT) callOs =<< ensureRinL (dcerr OutcomeT) defOs codeOs
-  return (as, os)
-  where
-    dcerr, ccerr :: Show x => ValType -> [x] -> [x] -> CompileError
-    dcerr t xs ys = DefCodeListConflict (defName def) t (map show xs) (map show ys)
-    ccerr t xs ys = CodeCallListConflict (defName def) t (map show xs) (map show ys)
-    ensureRrelL _ _ [] olds = return olds
-    ensureRrelL rel err news olds
-     | Set.fromList olds `rel` Set.fromList news = return news
-     | otherwise = throwError $ err olds news
-    ensureRinL = ensureRrelL Set.isSubsetOf
-    ensureRisL = ensureRrelL (\old new -> Set.null old || old == new)
+data Setting = Setting
+  { settingActions :: [Value]
+  , settingOutcomes :: [Value]
+  } deriving (Eq, Ord, Read, Show)
 
-defcallArgs :: (IsStatement s, Functor m, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m (Map Name (Val (Act s) (Out s)))
-defcallArgs def call = do
-  let paramlist = callArgs call
-  let parammap = callKwargs call
-  let varlist = defArgs def
-  let unknowns = Set.fromList (Map.keys parammap) Set.\\ Set.fromList (map fst varlist)
-  when (length paramlist > length varlist) (throwError $ TooManyArgs $ show call)
-  unless (Set.null unknowns) (throwError $ UnknownArgs (show call) unknowns)
-  arglist <- mapM (uuncurry joinArgs) (zip (defArgs def) infiniteCallArgs)
-  Map.fromList <$> mapM handleKwargs arglist
-  where
-    uuncurry = uncurry . uncurry
-    infiniteCallArgs = (Just <$> callArgs call) ++ repeat Nothing
-    handleKwargs (k, v) = joinKwargs k (Map.lookup k (callKwargs call)) v
-    joinArgs argname Nothing mval = return (argname, mval)
-    joinArgs argname mdflt Nothing = return (argname, mdflt)
-    joinArgs argname (Just dflt) (Just val)
-      | typesMatch dflt val = return (argname, Just val)
-      | otherwise = throwError (ArgMismatch (defName def) argname (typeOf dflt) (typeOf val))
-    joinKwargs argname Nothing Nothing  = throwError (ArgMissing (defName def) argname)
-    joinKwargs argname (Just dflt) (Just val)
-      | typesMatch dflt val = return (argname, val)
-      | otherwise = throwError (ArgMismatch (defName def) argname (typeOf dflt) (typeOf val))
-    joinKwargs argname mdflt mval = return (argname, fromMaybe (fromJust mdflt) mval)
+checkEnumMatchR :: MonadError EnumError m => [Value] -> [Value] -> m [Value]
+checkEnumMatchR xs [] = return xs
+checkEnumMatchR [] ys = return ys
+checkEnumMatchR xs ys
+  | Set.fromList xs == Set.fromList ys = return ys
+  | otherwise = throwError $ EnumMismatch xs ys
 
-makeContext :: (IsStatement s, Functor m, MonadError CompileError m) =>
-  Def s -> Call (Act s) (Out s) -> m (Context (Act s) (Out s))
-makeContext def call = do
-  args <- defcallArgs def call
-  (as, os) <- defcallAOlists def call
-  when (List.null as) (throwError (NoList (defName def) ActionT))
-  when (List.null os) (throwError (NoList (defName def) OutcomeT))
-  return $ Context args as os
+joinSettingWithCall :: CompileErrorM m => Name -> Call -> Setting -> m Setting
+joinSettingWithCall defname call setting = do
+  let getAEnum = checkEnumMatchR (settingActions setting) (callActions call)
+  let getOEnum = checkEnumMatchR (settingOutcomes setting) (callOutcomes call)
+  let wrapAerr = throwError . AListErr defname
+  let wrapOerr = throwError . OListErr defname
+  as <- either wrapAerr return (runExcept getAEnum)
+  os <- either wrapOerr return (runExcept getOEnum)
+  return setting{settingActions=as, settingOutcomes=os}
 
-compile :: IsStatement s =>
-  Def s -> Call (Act s) (Out s) ->
-  Either CompileError (CompiledAgent s)
-compile def call = do
-  context <- makeContext def call
-  program <- either (throwError . WrapEvalErr) pure (codeToProgram context (defCode def))
+initialVariables :: CompileErrorM m =>
+  Name ->
+  Setting ->
+  [(Name, VarType, Maybe VarVal)] ->
+  [Value] ->
+  Map Name Value ->
+  m (Map Name VarVal)
+initialVariables defname setting vars args kwargs = updateVars where
+  updateVars = do
+    when (length args > length vars)
+      (throwError $ ArgErr defname $ TooManyArgs (length vars) (length args))
+    unless (Set.null unknowns)
+      (throwError $ ArgErr defname $ UnknownArgs unknowns)
+    varsWithArgs <- mapM (uncurry applyArg) (zip vars extendedArgs)
+    updatedVars <- mapM applyKwarg varsWithArgs
+    return $ Map.fromList updatedVars
+  fst3 (x, _, _) = x
+  unknowns = Set.fromList (Map.keys kwargs) \\ Set.fromList (map fst3 vars)
+  extendedArgs = (map Just args) ++ repeat Nothing
+  applyArg (varname, t, mdflt) Nothing = return (varname, t, mdflt)
+  applyArg (varname, t, _) (Just val) = (,,) varname t . Just <$> cast varname t val
+  applyKwarg (varname, t, mval) = case (mval, Map.lookup varname kwargs) of
+    (Nothing, Nothing) -> throwError $ ArgErr defname $ ArgMissing varname t
+    (Just dflt, Nothing) -> return (varname, dflt)
+    (_, Just val) -> (,) varname <$> cast varname t val
+  cast vname NumberT v = maybe
+    (throwError $ ArgErr defname $ ArgIsNotNum vname v)
+    (return . Number)
+    (readMaybe v)
+  cast vname (ClaimT ActionT) v = if v `elem` settingActions setting
+    then throwError $ ArgErr defname $ ArgIsNotIn vname v $ settingActions setting
+    else return $ Action v
+  cast vname (ClaimT OutcomeT) v = if v `elem` settingOutcomes setting
+    then throwError $ ArgErr defname $ ArgIsNotIn vname v $ settingOutcomes setting
+    else return $ Outcome v
+
+-------------------------------------------------------------------------------
+  
+makeContext :: CompileErrorM m => Setting -> Call -> Def -> m Context
+makeContext setting call def = do
+  let n = defName def
+  setting' <- joinSettingWithCall n call setting
+  when (null $ settingActions setting') (throwError $ AListErr n EnumMissing)
+  when (null $ settingOutcomes setting') (throwError $ OListErr n EnumMissing)
+  vars <- initialVariables n setting' (defArgs def) (callArgs call) (callKwargs call)
+  return $ Context vars (settingActions setting') (settingOutcomes setting') n
+
+-- TODO: It is now the user's job to both (a) draw the action/outcome lists
+-- from the code (using actionsMentioned / outcomesMentioned / claimsMade), and
+-- (b) check that statements which are supposed to be modalized are in fact
+-- modalized (using isModalized).
+compile :: CompileErrorM m => Setting -> Call -> Def -> m CompiledAgent
+compile setting call def = do
+  context <- makeContext setting call def
+  program <- codeToProgram context (defCode def)
   return $ Map.map F.simplify program
