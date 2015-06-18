@@ -243,10 +243,28 @@ printMultiResults ctrls call0 r0 calls rs =
 -------------------------------------------------------------------------------
 
 modalClaimValues :: ParsedClaim -> [(ClaimType, Value)]
-modalClaimValues (ParsedClaim n _ rel) = case n of
+modalClaimValues (ParsedClaim name _ rel) = case name of
   "Me" -> map (ActionT,) (mapMaybe lit $ relToMentions rel)
   "Them" -> map (OutcomeT,) (mapMaybe lit $ relToMentions rel)
   _ -> []
+
+handleModalClaim :: MonadError DefError m =>
+  [(Value, a)] -> [(Value, o)] -> CompiledClaim -> m (CombatVar a o)
+handleModalClaim as os claim@(CompiledClaim name mcall mtype val) = handler where
+  err = throwError . InvalidClaim claim
+  mcall' = if mcall == Just (simpleCall "Me") then Nothing else mcall
+  getAVal = lookupVal ActionT as val
+  getOVal = lookupVal OutcomeT os val
+  handler = do
+    when (name `notElem` ["Me", "Them"])
+      (err "claim must be about 'Me' or 'Them'")
+    when (name == "Me" && mtype == Just OutcomeT)
+      (err "'Me' returns actions, not responses")
+    when (name == "Me" && isJust mcall && mcall /= Just (simpleCall "Them"))
+      (err "cannot reason about what 'Me' would do against another")
+    when (name == "Them" && mtype == Just ActionT)
+      (err "'Them' returns responses, not actions")
+    if name == "Me" then MeVsThemIs <$> getAVal else ThemVsIs mcall' <$> getOVal
 
 modalCombatCConf :: (Show a, Show o) =>
   [(Value, a)] -> [(Value, o)] -> CompileConfig a (CombatVar a o)
@@ -255,20 +273,7 @@ modalCombatCConf aTable oTable = CompileConfig
   , availableOutcomes = map fst oTable
   , compileAction = lookupVal ActionT aTable
   , claimValues = modalClaimValues
-  , handleClaim = \claim@(CompiledClaim n mcall mtype val) -> do
-      let err = throwError . InvalidClaim claim
-      let mcall' = if mcall == Just (simpleCall "Me") then Nothing else mcall
-      let getAVal = lookupVal ActionT aTable val
-      let getOVal = lookupVal OutcomeT oTable val
-      when (n `notElem` ["Me", "Them"])
-        (err "claim must be about 'Me' or 'Them'")
-      when (n == "Me" && mtype == Just OutcomeT)
-        (err "'Me' returns actions, not responses")
-      when (n == "Me" && isJust mcall && mcall /= Just (simpleCall "Them"))
-        (err "cannot reason about what 'Me' would do against another")
-      when (n == "Them" && mtype == Just ActionT)
-        (err "'Them' returns responses, not actions")
-      if n == "Me" then MeVsThemIs <$> getAVal else ThemVsIs mcall' <$> getOVal
+  , handleClaim = handleModalClaim aTable oTable
   , finalizeFormula = \f -> do
       unless (isModalized f) (throwError $ IsUnmodalized $ show <$> f)
       return $ simplify f }
@@ -276,9 +281,38 @@ modalCombatCConf aTable oTable = CompileConfig
 -------------------------------------------------------------------------------
 
 problemClaimValues :: ParsedClaim -> [(ClaimType, Value)]
-problemClaimValues (ParsedClaim n _ rel) = case n of
+problemClaimValues (ParsedClaim name _ rel) = case name of
   "U" -> map (ActionT,) (mapMaybe lit $ relToMentions rel)
   _ -> map (OutcomeT,) (mapMaybe lit $ relToMentions rel)
+
+handleProblemClaim :: MonadError DefError m =>
+  [(Value, u)] -> [(Value, a)] -> CompiledClaim -> m (UVar u a)
+handleProblemClaim us as claim@(CompiledClaim name mcall mtype val) = handler where
+  err :: MonadError DefError m => String -> m a
+  err = throwError . InvalidClaim claim
+  getUVal = lookupVal ActionT us val
+  getAVal = lookupVal OutcomeT as val
+  notAnAgent = err "not a valid agent (use A1, A2, ...)"
+  getPNum = case name of
+    "U" -> return (0 :: Int)
+    "A" -> return 1
+    ('A':num) -> maybe notAnAgent return (readMaybe num)
+    _ -> notAnAgent
+  handler = do
+    pnum <- getPNum
+    when (name /= "U" && pnum < 1) (err "player numbers must be at least 1")
+    when (name == "U" && isJust mcall)
+      (err "cannot reason about self vs other agents")
+    when (name /= "U" && isJust mcall)
+      (err "universe cannot reason about agents vs other universes")
+    -- This is correct. Don't be confused: problem "outcomes" are ActionT,
+    -- and vice versa. (theory "outcomes" are OutcomeT. Someone has to be
+    -- reversed. Or we could find better names for ActionT/OutcomeT.)
+    when (name == "U" && mtype == Just OutcomeT)
+      (err "'U' returns outcomes, not actions")
+    when (name /= "U" && mtype == Just ActionT)
+      (err "players returns actions, not outcomes")
+    if pnum == 0 then UMe <$> getUVal else UThem pnum <$> getAVal
 
 problemCConf :: [(Value, u)] -> [(Value, a)] -> CompileConfig u (UVar u a)
 problemCConf uTable aTable = CompileConfig
@@ -286,38 +320,34 @@ problemCConf uTable aTable = CompileConfig
   , availableOutcomes = map fst aTable
   , compileAction = lookupVal ActionT uTable
   , claimValues = problemClaimValues
-  , handleClaim = \claim@(CompiledClaim n mcall mtype val) -> do
-      let err = throwError . InvalidClaim claim
-      pnum <- case n of
-        "U" -> return (0 :: Int)
-        "A" -> return 1
-        ('A':num) -> maybe (throwError $ InvalidClaim claim
-          "not a valid agent (use A1, A2, ...)") return (readMaybe num)
-        _ -> throwError $ InvalidClaim claim "not a valid agent (use A1, A2, ...)"
-      when (n /= "U" && pnum < 1) (err "player numbers must be at least 1")
-      when (n == "U" && isJust mcall)
-        (err "cannot reason about self vs other agents")
-      when (n /= "U" && isJust mcall)
-        (err "universe cannot reason about agents vs other universes")
-      -- This is correct. Don't be confused: problem "outcomes" are ActionT,
-      -- and vice versa. (theory "outcomes" are OutcomeT. Someone has to be
-      -- reversed. Or we could find better names for ActionT/OutcomeT.)
-      when (n == "U" && mtype == Just OutcomeT)
-        (err "'U' returns outcomes, not actions")
-      when (n /= "U" && mtype == Just ActionT)
-        (err "players returns actions, not outcomes")
-      let getUVal = lookupVal ActionT uTable val
-      let getAVal = lookupVal OutcomeT aTable val
-      if pnum == 0 then UMe <$> getUVal else UThem pnum <$> getAVal
+  , handleClaim = handleProblemClaim uTable aTable
   , finalizeFormula = return . simplify }
 
 -------------------------------------------------------------------------------
 
 theoryClaimValues :: ParsedClaim -> [(ClaimType, Value)]
-theoryClaimValues (ParsedClaim n _ rel) = case n of
+theoryClaimValues (ParsedClaim name _ rel) = case name of
   "A" -> map (ActionT,) (mapMaybe lit $ relToMentions rel)
   "U" -> map (OutcomeT,) (mapMaybe lit $ relToMentions rel)
   _ -> []
+
+handleTheoryClaim :: MonadError DefError m =>
+  [(Value, a)] -> [(Value, u)] -> CompiledClaim -> m (AVar a u)
+handleTheoryClaim as us claim@(CompiledClaim name mcall mtype val) = handler where
+  err = throwError . InvalidClaim claim
+  getAVal = lookupVal ActionT as val
+  getUVal = lookupVal OutcomeT us val
+  handler = do
+    when (name `notElem` ["A", "U"]) (err "invalid player (use A or U)")
+    when (name == "A" && isJust mcall)
+      (err "cannot reason about self in other universes")
+    when (name == "U" && isJust mcall)
+      (err "cannot reason about universe vs other agents")
+    when (name == "A" && mtype == Just OutcomeT)
+      (err "'A' returns actions, not outcomes")
+    when (name == "U" && mtype == Just ActionT)
+      (err "'U' returns outcomes, not actions")
+    if name == "A" then AMe <$> getAVal else AThem <$> getUVal
 
 theoryCConf :: (Show a, Show u) =>
   [(Value, a)] -> [(Value, u)] -> CompileConfig a (AVar a u)
@@ -326,20 +356,7 @@ theoryCConf aTable uTable = CompileConfig
   , availableOutcomes = map fst uTable
   , compileAction = lookupVal ActionT aTable
   , claimValues = theoryClaimValues
-  , handleClaim = \claim@(CompiledClaim n mcall mtype val) -> do
-      let err = throwError . InvalidClaim claim
-      when (n `notElem` ["A", "U"]) (err "invalid player (use A or U)")
-      when (n == "A" && isJust mcall)
-        (err "cannot reason about self in other universes")
-      when (n == "U" && isJust mcall)
-        (err "cannot reason about universe vs other agents")
-      when (n == "A" && mtype == Just OutcomeT)
-        (err "'A' returns actions, not outcomes")
-      when (n == "U" && mtype == Just ActionT)
-        (err "'U' returns outcomes, not actions")
-      let getAVal = lookupVal ActionT aTable val
-      let getUVal = lookupVal OutcomeT uTable val
-      if n == "A" then AMe <$> getAVal else AThem <$> getUVal
+  , handleClaim = handleTheoryClaim aTable uTable
   , finalizeFormula = \f -> do
       unless (isModalized f) (throwError $ IsUnmodalized $ show <$> f)
       return $ simplify f }
@@ -380,18 +397,17 @@ executeAction setting = execute where
     (pDef, oList, aLists) <- run $ findDef ProblemT (problems setting) pCall
     tDefs <- run $ mapM (findDef TheoryT (theories setting)) tCalls
     let (pAms, pOms) = effectiveAOs problemClaimValues (defCode pDef) pCall
-    let pAs = if null oList then pAms else oList
-    let pOs = if all null aLists then pOms else concat aLists
-    let pConf = problemCConf (makeTable pAs) (makeTable pOs)
-    let { tConfs = zipWith3 (\tDef tCall aList ->
-      let (tAms, tOms) = effectiveAOs theoryClaimValues (defCode tDef) tCall
-      in theoryCConf
-        (makeTable $ if null aList then tAms else aList)
-        (makeTable $ if null oList then tOms else oList))
-      tDefs tCalls aLists }
+    let pATable = makeTable $ if null oList then pAms else oList
+    let pOTable = makeTable $ if all null aLists then pOms else concat aLists
+    let pConf = problemCConf pATable pOTable
+    let makeTableR xs ys = makeTable (if null xs then ys else xs)
+    let { makeTConf def call aList =
+      let (tAms, tOms) = effectiveAOs theoryClaimValues (defCode def) call
+      in theoryCConf (makeTableR tAms aList) (makeTableR tOms oList) }
+    let tConfs = zipWith3 makeTConf tDefs tCalls aLists
+    let tCompile (conf, call, def) = wrapCErr $ compile conf call def
     p <- run $ wrapCErr $ compile pConf pCall pDef
-    ts <- run $ mapM (\(conf, call, def) -> wrapCErr $ compile conf call def)
-      (zip3 tConfs tCalls tDefs)
+    ts <- run $ mapM tCompile (zip3 tConfs tCalls tDefs)
     let cmap = multiCompetition p ts
     printCompetitionTable ctrls cmap
     printKripkeTable ctrls cmap
@@ -423,8 +439,8 @@ actions :: [GameObject] -> [Action]
 actions objects = [x | Execute x <- objects]
 
 gameToSetting :: MonadError FileError m => Name -> [GameObject] -> m Setting
-gameToSetting n = foldM addToSetting emptySetting where
-  emptySetting = Setting n Map.empty Map.empty Map.empty
+gameToSetting name = foldM addToSetting emptySetting where
+  emptySetting = Setting name Map.empty Map.empty Map.empty
   addToSetting setting (Agent a) =
     (\x -> setting{agents=x}) <$> addToMap AgentT (defName a) a (agents setting)
   addToSetting setting (Theory t) =
@@ -433,8 +449,10 @@ gameToSetting n = foldM addToSetting emptySetting where
     (\x -> setting{problems=x}) <$>
       addToMap ProblemT (defName p) (p, v, vs) (problems setting)
   addToSetting setting (Execute _) = return setting
-  addToMap t name val m = do
-    when (Map.member name m) (throwError $ NameCollision t name)
+  addToMap :: MonadError FileError m =>
+    DefType -> Name -> x -> Map Name x -> m (Map Name x)
+  addToMap t n val m = do
+    when (Map.member n m) (throwError $ NameCollision t n)
     return $ Map.insert name val m
 
 gameParser :: Parser [GameObject]
