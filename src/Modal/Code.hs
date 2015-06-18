@@ -301,7 +301,7 @@ claimsMade (Code frags) = concatMap fragClaims frags where
 
 type CompiledAgent = Map Value (ModalFormula CompiledClaim)
 
-codeToProgram :: CompileErrorM m => CompileContext -> Code -> m CompiledAgent
+codeToProgram :: MonadError CompileError m => CompileContext -> Code -> m CompiledAgent
 codeToProgram context code = do
   (prog, state) <- runStateT (compileCode code) context
   return $ Map.fromList [(a, prog a) | a <- actionList state]

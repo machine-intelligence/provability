@@ -39,4 +39,4 @@ main = do
   settings <- mapM compileFile (optEnvs opts)
   case settings of
     [] -> playFile (optFile opts)
-    (x:xs) -> foldM (run .: mergeSettings) x xs >>= playFile' (optFile opts)
+    (x:xs) -> foldM (run .: mergeSettingsR) x xs >>= playFile' (optFile opts)

@@ -5,7 +5,6 @@ module Modal.CompilerBase where
 import Prelude hiding (readFile, sequence, mapM, foldr1, concat, concatMap)
 import Control.Arrow (first)
 import Control.Applicative
-import Data.Maybe (fromMaybe)
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence, state)
 import Data.Foldable
@@ -19,8 +18,10 @@ import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
+import qualified Data.List as List
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Data.Text as Text
 import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
@@ -156,29 +157,72 @@ relToMentions (NotIn as) = as
 
 -------------------------------------------------------------------------------
 
-data ParsedClaim = ParsedClaim Name (Maybe Name) (Relation (Ref Value))
+data Call = Call
+  { callName :: Name
+  , callArgs :: [Value]
+  , callKwargs :: Map Name Value
+  , callActions :: [Value]
+  , callOutcomes :: [Value]
+  } deriving (Eq, Ord)
+
+instance Show Call where
+  show (Call n args kwargs _ _) = n ++ paramstr where
+    paramstr = printf "(%s%s%s)" argstr mid kwargstr
+    argstr = renderArgs id args
+    mid = if List.null args || Map.null kwargs then "" else "," :: String
+    kwargstr = renderArgs (uncurry $ printf "%s=%s") (Map.toAscList kwargs)
+
+instance Parsable Call where
+  parser = do
+    n <- value
+    (args, kwargs) <- option ([], Map.empty) (try argsParser)
+    as <- option [] valuesParser
+    os <- option [] valuesParser
+    return $ Call n args kwargs as os
+    where
+      valuesParser = try (brackets (string "...") $> []) <|> listParser value
+      argsParser = parens argsThenKwargs where
+        argsThenKwargs = (,) <$> allArgs <*> allKwargs
+        allArgs = value `sepEndBy` comma
+        allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
+        kwarg = (,) <$> name <*> (symbol "=" *> value)
+
+instance Read Call where
+  readsPrec _ s = case parse (parser <* eof) "reading call" (Text.pack s) of
+    Right result -> [(result,"")]
+    Left err -> error $ show err
+
+simpleCall :: Name -> Call
+simpleCall n = Call n [] Map.empty [] []
+
+-------------------------------------------------------------------------------
+
+data ParsedClaim = ParsedClaim Name (Maybe Call) (Relation (Ref Value))
   deriving (Eq, Ord, Read)
 
 instance Show ParsedClaim where
-  show (ParsedClaim n o r) = printf "%s(%s)%s" n (fromMaybe "" o) (show r)
+  show (ParsedClaim n o r) = printf "%s(%s)%s" n (maybe "" show o) (show r)
 
 instance Parsable ParsedClaim where
   parser = ParsedClaim <$>
              name <*>
-             optional (parens name) <*>
+             maybeCall <*>
              relationParser (refParser value)
+             where maybeCall = try (symbol "()" $> Nothing)
+                             <|> try (Just <$> parens parser)
+                             <|> pure Nothing
 
 -------------------------------------------------------------------------------
 
 data CompiledClaim = CompiledClaim
   { claimNameIs :: Name
-  , claimPlayedVs :: Maybe Name
+  , claimPlayedVs :: Maybe Call
   , claimType :: Maybe ClaimType
   , claimAgentPlays :: Value
   } deriving (Eq, Ord, Read)
 
 instance Show CompiledClaim where
-  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n (fromMaybe "" o) showt v where
+  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n (maybe "" show o) showt v where
     showt = maybe ("" :: String) (printf "%s " . tSymbol) t
     tSymbol ActionT = '@'
     tSymbol OutcomeT = '$'
@@ -254,7 +298,7 @@ refError err = gets agentName >>= throwError . flip RefErr err
 defError :: MonadCompile m => DefError -> m a
 defError err = gets agentName >>= throwError . flip DefErr err
 
-type MonadCompile m = (CompileErrorM m, MonadState CompileContext m)
+type MonadCompile m = (MonadError CompileError m, MonadState CompileContext m)
 
 -------------------------------------------------------------------------------
 
@@ -309,22 +353,15 @@ instance Show RefError where
   show (ExpectingO n) = printf "action variable %s used as an outcome" n
 
 data DefError
-  = UnmodalizedStatement (ModalFormula CompiledClaim)
-  | UnknownAgent Name
+  = IsUnmodalized (ModalFormula String)
+  | InvalidValue ClaimType Value [Value]
+  | InvalidClaim CompiledClaim String
   deriving (Eq, Read)
 
 instance Show DefError where
-  show (UnmodalizedStatement s) = printf "unmodalized statement: %s" (show s)
-  show (UnknownAgent n) = printf "unknown agent referenced: %s" (show n)
-
-data GameError
-  = UnknownDef DefType Name
-  | NameCollision DefType Name
-  deriving (Eq, Read)
-
-instance Show GameError where
-  show (UnknownDef t n) = printf "unknown %s: %s" (show t) n
-  show (NameCollision t n) = printf "name collision: %s %s is already defined" (show t) n
+  show (IsUnmodalized s) = printf "unmodalized statement: %s" (show s)
+  show (InvalidValue t v vs) = printf "invalid %s %s: expected one of [%s]" (show t) (show v) (renderArgs id vs)
+  show (InvalidClaim c s) = printf "invalid claim: %s (%s)" (show c) s
 
 data CompileError
   = ArgErr Name ArgumentError
@@ -332,7 +369,6 @@ data CompileError
   | OListErr Name EnumError
   | RefErr Name RefError
   | DefErr Name DefError
-  | GameErr FilePath GameError
   deriving (Eq, Read)
 
 instance Show CompileError where
@@ -341,6 +377,31 @@ instance Show CompileError where
   show (OListErr n e) = printf "error while compiling %s: outcome %s" n (show e)
   show (RefErr n e) = printf "error while compiling %s: %s" n (show e)
   show (DefErr n e) = printf "error while compiling %s: %s" n (show e)
-  show (GameErr f e) = printf "error while compiling %s: %s" f (show e)
 
-type CompileErrorM m = (Applicative m, MonadError CompileError m)
+-- TODO: Not yet in use.
+data ExecutionError
+  = FixpointError String
+  deriving (Eq, Read)
+
+instance Show ExecutionError where
+  show (FixpointError v) = printf "unknown variable when finding fixpoint: %s" v
+
+data FileError
+  = UnknownDef DefType Name
+  | NameCollision DefType Name
+  deriving (Eq, Read)
+
+instance Show FileError where
+  show (UnknownDef t n) = printf "unknown %s: %s" (show t) n
+  show (NameCollision t n) = printf "name collision: %s %s is already defined" (show t) n
+
+data RuntimeError
+  = FileErr FilePath FileError
+  | ExecErr FilePath String ExecutionError
+  | CompileErr FilePath CompileError
+  deriving (Eq, Read)
+
+instance Show RuntimeError where
+  show (FileErr f g) = printf "error in %s: %s" f (show g)
+  show (ExecErr f x r) = printf "error running %s in %s: %s" x f (show r)
+  show (CompileErr f c) = printf "error running %s: %s" f (show c)

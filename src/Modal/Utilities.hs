@@ -12,12 +12,13 @@ module Modal.Utilities
   , swap
   , firstDup
   , die
+  , wrapError
   , force
   , run
   , runFile
   ) where
 import Prelude hiding (readFile)
-import Control.Monad (foldM)
+import Control.Monad.Except hiding (mapM, sequence)
 import Data.Text (Text)
 import Data.Text.IO (readFile)
 import System.IO (stderr, hPutStrLn)
@@ -66,6 +67,9 @@ firstDup = either Just (const Nothing) . foldM addToSet Set.empty where
 
 die :: Show a => a -> IO b
 die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure
+
+wrapError :: MonadError b m => (a -> b) -> Except a c -> m c
+wrapError wrap = either (throwError . wrap) return . runExcept
 
 force :: Show l => Either l r -> r
 force = either (error . printf "Forcing failed: %s" . show) id
