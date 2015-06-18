@@ -125,43 +125,82 @@ callParser = do
 
 -------------------------------------------------------------------------------
 
-checkEnumMatchR :: MonadError EnumError m => [Value] -> [Value] -> m [Value]
-checkEnumMatchR xs [] = return xs
-checkEnumMatchR [] ys = return ys
-checkEnumMatchR xs ys
-  | Set.fromList xs == Set.fromList ys = return ys
-  | otherwise = throwError $ EnumMismatch xs ys
-
+-- Errors unless the first list is a subset of the second.
 ensureEnumContains :: MonadError EnumError m => [Value] -> [Value] -> m ()
 ensureEnumContains xs enum =
   let missing = Set.fromList xs \\ Set.fromList enum
   in unless (Set.null missing) (throwError $ EnumExcludes missing)
 
+-- Checks that the first list and the second list are equivalent up to
+-- ordering, where an empty list is treated as missing (and ignored). Returns
+-- the non-missing list if any, preferring the ordering of the right list.
+matchEnumsR :: MonadError EnumError m => [Value] -> [Value] -> m [Value]
+matchEnumsR xs [] = return xs
+matchEnumsR [] ys = return ys
+matchEnumsR xs ys
+  | Set.fromList xs == Set.fromList ys = return ys
+  | otherwise = throwError $ EnumMismatch xs ys
+
+-- Example: give this function the A/O lists from the def and then the A/O
+-- lists from the call, and it ensures that they match in terms of values, and
+-- prefers the ordering given by the call if any.
+matchAOListsR :: CompileErrorM m =>
+  Name -> ([Value], [Value]) -> ([Value], [Value]) -> m ([Value], [Value])
+matchAOListsR defname (lAs, lOs) (rAs, rOs) = do
+  let wrapE err = throwError . err defname
+  as <- either (wrapE AListErr) return (runExcept $ matchEnumsR lAs rAs)
+  os <- either (wrapE OListErr) return (runExcept $ matchEnumsR lOs rOs)
+  return (as, os)
+
 -------------------------------------------------------------------------------
 
-data Setting = Setting
-  { settingActions :: [Value]
-  , settingOutcomes :: [Value]
-  } deriving (Eq, Ord, Read, Show)
+data CompileConfig v = CompileConfig
+    { availableActions :: [Value]
+    , availableOutcomes :: [Value]
+    , claimValues :: forall m. CompileErrorM m => ParsedClaim -> m (ClaimType, Set Value)
+    , handleClaim :: forall m. CompileErrorM m => CompiledClaim -> m v
+    , finalizeFormula :: forall m. CompileErrorM m => ModalFormula v -> m (ModalFormula v) }
 
-joinSettingWithCall :: CompileErrorM m => Name -> Call -> Setting -> m Setting
-joinSettingWithCall defname call setting = do
-  let getAEnum = checkEnumMatchR (settingActions setting) (callActions call)
-  let getOEnum = checkEnumMatchR (settingOutcomes setting) (callOutcomes call)
-  let wrapAerr = throwError . AListErr defname
-  let wrapOerr = throwError . OListErr defname
-  as <- either wrapAerr return (runExcept getAEnum)
-  os <- either wrapOerr return (runExcept getOEnum)
-  return setting{settingActions=as, settingOutcomes=os}
+-- Finds all actions & outcomes mentioned in the code.
+codeAOs :: CompileErrorM m => CompileConfig v -> Code -> m ([Value], [Value])
+codeAOs conf code = do
+  let aMentions = actionsMentioned code
+  let oMentions = outcomesMentioned code
+  let claims = claimsMade code
+  let aLoR (t, vs) = if t == ActionT then Left vs else Right vs
+  (aSets, oSets) <- partitionEithers <$> mapM (fmap aLoR . claimValues conf) claims
+  let listify = Set.toList . Set.unions
+  return (aMentions ++ listify aSets, oMentions ++ listify oSets)
+
+-- Ensures that all actions (outcomes) mentioned in the code appear in the
+-- available action (outcome) list.
+reconfigureWithCode :: CompileErrorM m => Name -> Code -> CompileConfig v -> m (CompileConfig v)
+reconfigureWithCode defname code conf = do
+  (as, os) <- codeAOs conf code
+  let ensureA = ensureEnumContains as $ availableActions conf
+  let ensureO = ensureEnumContains os $ availableOutcomes conf
+  either (throwError . AListErr defname) return ensureA
+  either (throwError . OListErr defname) return ensureO
+  return conf
+
+-- Allows the call to reorder the available action (outcome) lists.
+reconfigureWithCall :: CompileErrorM m => Name -> Call -> CompileConfig v -> m (CompileConfig v)
+reconfigureWithCall defname call conf = do
+  let lAOs = (availableActions conf, availableOutcomes conf)
+  let rAOs = (callActions call, callOutcomes call)
+  (as, os) <- matchAOListsR defname lAOs rAOs
+  return conf{availableActions=as, availableOutcomes=os}
+  
+-------------------------------------------------------------------------------
 
 initialVariables :: CompileErrorM m =>
   Name ->
-  Setting ->
+  ([Value], [Value]) ->
   [(Name, VarType, Maybe VarVal)] ->
   [Value] ->
   Map Name Value ->
   m (Map Name VarVal)
-initialVariables defname setting vars args kwargs = updateVars where
+initialVariables defname (as, os) vars args kwargs = updateVars where
   updateVars = do
     when (length args > length vars)
       (throwError $ ArgErr defname $ TooManyArgs (length vars) (length args))
@@ -183,59 +222,29 @@ initialVariables defname setting vars args kwargs = updateVars where
     (throwError $ ArgErr defname $ ArgIsNotNum vname v)
     (return . Number)
     (readMaybe v)
-  cast vname (ClaimT ActionT) v = if v `elem` settingActions setting
-    then throwError $ ArgErr defname $ ArgIsNotIn vname v $ settingActions setting
+  cast vname (ClaimT ActionT) v = if v `elem` as
+    then throwError $ ArgErr defname $ ArgIsNotIn vname v as
     else return $ Action v
-  cast vname (ClaimT OutcomeT) v = if v `elem` settingOutcomes setting
-    then throwError $ ArgErr defname $ ArgIsNotIn vname v $ settingOutcomes setting
+  cast vname (ClaimT OutcomeT) v = if v `elem` os
+    then throwError $ ArgErr defname $ ArgIsNotIn vname v os
     else return $ Outcome v
 
--------------------------------------------------------------------------------
-
-data CompileConfig = CompileConfig
-    { confSetting :: Setting
-    , claimValues :: forall m. CompileErrorM m =>
-        ParsedClaim -> m (ClaimType, Set Value)
-    -- Recommendation: use finalizeFormula = return . simplify
-    -- (with perhaps an isModalized check in there somewhere.)
-    , finalizeFormula :: forall m. CompileErrorM m =>
-        ModalFormula CompiledClaim -> m (ModalFormula CompiledClaim) }
-
-codeAOs :: CompileErrorM m => CompileConfig -> Code -> m ([Value], [Value])
-codeAOs conf code = do
-  let aMentions = actionsMentioned code
-  let oMentions = outcomesMentioned code
-  let claims = claimsMade code
-  let aLoR (t, vs) = if t == ActionT then Left vs else Right vs
-  (aSets, oSets) <- partitionEithers <$> mapM (fmap aLoR . claimValues conf) claims
-  let listify = Set.toList . Set.unions
-  return (aMentions ++ listify aSets, oMentions ++ listify oSets)
-
-settingSuitableForCode :: CompileErrorM m =>
-  Name -> CompileConfig -> Code -> m Setting
-settingSuitableForCode defname conf code = do
-  (as, os) <- codeAOs conf code
-  let wrapAerr = throwError . AListErr defname
-  let wrapOerr = throwError . OListErr defname
-  either wrapAerr return $ ensureEnumContains as (settingActions $ confSetting conf)
-  either wrapOerr return $ ensureEnumContains os (settingOutcomes $ confSetting conf)
-  return $ confSetting conf
-  
--------------------------------------------------------------------------------
-
-makeContext :: CompileErrorM m => CompileConfig -> Call -> Def -> m CompileContext
+makeContext :: CompileErrorM m => CompileConfig v -> Call -> Def -> m CompileContext
 makeContext conf call def = do
   let n = defName def
-  suitableSetting <- settingSuitableForCode n conf (defCode def)
-  setting <- joinSettingWithCall n call suitableSetting
-  when (null $ settingActions setting) (throwError $ AListErr n EnumMissing)
-  when (null $ settingOutcomes setting) (throwError $ OListErr n EnumMissing)
-  vars <- initialVariables n setting (defArgs def) (callArgs call) (callKwargs call)
-  return $ CompileContext vars (settingActions setting) (settingOutcomes setting) n
+  reconf <- reconfigureWithCall n call =<< reconfigureWithCode n (defCode def) conf
+  let (as, os) = (availableActions reconf, availableOutcomes reconf)
+  when (null as) (throwError $ AListErr n EnumMissing)
+  when (null os) (throwError $ OListErr n EnumMissing)
+  vars <- initialVariables n (as, os) (defArgs def) (callArgs call) (callKwargs call)
+  return $ CompileContext vars as os n
 
-compile :: CompileErrorM m => CompileConfig -> Call -> Def -> m CompiledAgent
+compile :: CompileErrorM m =>
+  CompileConfig v -> Call -> Def -> m (Map Value (ModalFormula v))
 compile conf call def = do
   context <- makeContext conf call def
   program <- codeToProgram context (defCode def)
-  let finalize k v = (,) k <$> finalizeFormula conf v
   Map.fromList <$> mapM (uncurry finalize) (Map.toList program)
+  where finalize action formula = (,) action <$> do
+          varified <- traverse (handleClaim conf) formula
+          finalizeFormula conf varified

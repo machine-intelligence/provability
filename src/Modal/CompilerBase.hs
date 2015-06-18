@@ -64,6 +64,15 @@ instance Show VarType where
 
 -------------------------------------------------------------------------------
 
+data DefType = AgentT | TheoryT | ProblemT deriving (Eq, Ord, Read, Enum)
+
+instance Show DefType where
+  show AgentT = "agent"
+  show TheoryT = "theory"
+  show ProblemT = "problem"
+
+-------------------------------------------------------------------------------
+
 data Ref a = Ref Name | Lit a deriving (Eq, Ord, Read)
 
 instance Show a => Show (Ref a) where
@@ -301,12 +310,21 @@ instance Show RefError where
 
 data DefError
   = UnmodalizedStatement (ModalFormula CompiledClaim)
-  | OtherError String
+  | UnknownAgent Name
   deriving (Eq, Read)
 
 instance Show DefError where
   show (UnmodalizedStatement s) = printf "unmodalized statement: %s" (show s)
-  show (OtherError s) = s
+  show (UnknownAgent n) = printf "unknown agent referenced: %s" (show n)
+
+data GameError
+  = UnknownDef DefType Name
+  | NameCollision DefType Name
+  deriving (Eq, Read)
+
+instance Show GameError where
+  show (UnknownDef t n) = printf "unknown %s: %s" (show t) n
+  show (NameCollision t n) = printf "name collision: %s %s is already defined" (show t) n
 
 data CompileError
   = ArgErr Name ArgumentError
@@ -314,6 +332,7 @@ data CompileError
   | OListErr Name EnumError
   | RefErr Name RefError
   | DefErr Name DefError
+  | GameErr FilePath GameError
   deriving (Eq, Read)
 
 instance Show CompileError where
@@ -322,5 +341,6 @@ instance Show CompileError where
   show (OListErr n e) = printf "error while compiling %s: outcome %s" n (show e)
   show (RefErr n e) = printf "error while compiling %s: %s" n (show e)
   show (DefErr n e) = printf "error while compiling %s: %s" n (show e)
+  show (GameErr f e) = printf "error while compiling %s: %s" f (show e)
 
 type CompileErrorM m = (Applicative m, MonadError CompileError m)
