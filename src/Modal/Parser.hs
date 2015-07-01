@@ -93,8 +93,8 @@ braces = between (symbol "{") (symbol "}")
 name :: Parser Name
 name = identifier (satisfy isNameFirstChar) (satisfy isNameChar)
 
-value :: Parser Value
-value = many1 (satisfy isValueChar)
+valueStr :: Parser String
+valueStr = many1 (satisfy isValueChar)
 
 isNameFirstChar, isNameChar, isValueChar :: Char -> Bool
 isNameFirstChar = (||) <$> isLetter <*> (`elem` ("-_'" :: String))

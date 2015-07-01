@@ -1,7 +1,8 @@
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 module Modal.Combat where
 import Prelude hiding (mapM, sequence, foldr)
 import Control.Applicative
@@ -130,11 +131,11 @@ instance Parsable GameObject where
         defParserWithExtras pValues problemDConf
       pValues = (,) <$> valuesParser <*> many1 valuesParser
       valuesParser = try vals <|> try dunno where
-        vals = P.brackets (P.value `sepEndBy` P.comma)
+        vals = P.brackets (parser `sepEndBy` P.comma)
         dunno = P.brackets (string "...") $> []
       pOldschoolBot = do
         P.keyword "bot"
-        name <- P.value
+        name <- P.valueStr
         P.symbol "="
         rawStatement <- parser
         let actTable = [("C", rawStatement), ("D", S.Neg rawStatement)]
@@ -217,9 +218,13 @@ printVsHeader ctrls call1 call2 =
     (printf "%s vs %s:\n" (show call1) (show call2))
 
 printMultiHeader :: Controls -> Call -> [Call] -> IO ()
-printMultiHeader ctrls call0 calls =
-  (unless $ ctrlHidden ctrls)
-    (printf "%s(%s):\n" (show call0) (renderArgs show calls))
+printMultiHeader ctrls call0 calls = unless (ctrlHidden ctrls) doDisplay where
+  doDisplay =
+    (printf "%s as U vs\n    %s:\n" (show call0)
+      (List.intercalate ",\n    " $ zipWith addAliases calls [1..]))
+  addAliases :: Call -> Int -> String
+  addAliases c d = printf "%s as A%s" (show c) (anum d)
+  anum d = if length calls == 1 then "" else show d
 
 printCompetitionTable :: Show v => Controls -> Map v (ModalFormula v) -> IO ()
 printCompetitionTable ctrls cmap =
@@ -240,12 +245,14 @@ printVsResults ctrls call1 r1 call2 r2 =
 
 printMultiResults :: (Show a, Show b) =>
   Controls -> Call -> a -> [Call] -> [b] -> IO ()
-printMultiResults ctrls call0 r0 calls rs =
-  (unless $ ctrlHidden ctrls)
-    (printf "  Result: %s=%s, %s\n\n"
-      (show call0) (show r0)
-      (renderArgs (uncurry renderPlays) (zip calls rs)))
-  where renderPlays c r = printf "%s=%s" (show c) (show r) :: String
+printMultiResults ctrls call0 r0 calls rs = unless (ctrlHidden ctrls) doDisplay where
+  doDisplay =
+    (printf "  Result: U()=%s, %s\n\n" (show r0)
+      (renderArgs id $ zipWith showAresult rs [1..]))
+  showAresult :: Show b => b -> Int -> String
+  showAresult r d = if length rs == 1
+    then printf "A()=%s" (show r)
+    else printf "A%d()=%s" d (show r)
 
 -------------------------------------------------------------------------------
 
@@ -461,7 +468,7 @@ gameToSetting name = foldM addToSetting emptySetting where
     DefType -> Name -> x -> Map Name x -> m (Map Name x)
   addToMap t n val m = do
     when (Map.member n m) (throwError $ NameCollision t n)
-    return $ Map.insert name val m
+    return $ Map.insert n val m
 
 gameParser :: Parser [GameObject]
 gameParser = many P.ignoredLine *> (parser `sepEndBy` many P.ignoredLine) <* end where

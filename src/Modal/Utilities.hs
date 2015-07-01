@@ -5,7 +5,6 @@ module Modal.Utilities
   , ($>)
   , (<$$>)
   , Name
-  , Value
   , enumerate
   , alter
   , every
@@ -44,7 +43,6 @@ x $> y = x *> pure y
 (<$$>) = flip (<$>)
 
 type Name = String
-type Value = String
 
 enumerate :: Enum a => [a]
 enumerate = enumFrom (toEnum 0)
@@ -66,7 +64,7 @@ firstDup = either Just (const Nothing) . foldM addToSet Set.empty where
   addToSet s x = if x `Set.member` s then Left x else Right (Set.insert x s)
 
 die :: Show a => a -> IO b
-die x = hPutStrLn stderr ("Error: " ++ show x) >> exitFailure
+die x = hPutStrLn stderr ("Failure: " ++ show x) >> exitFailure
 
 wrapError :: MonadError b m => (a -> b) -> Except a c -> m c
 wrapError wrap = either (throwError . wrap) return . runExcept

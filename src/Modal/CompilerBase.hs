@@ -12,6 +12,7 @@ import Data.Either (partitionEithers)
 import Data.Foldable
 import Data.Map (Map)
 import Data.Set (Set)
+import Data.String
 import Data.Traversable
 import Modal.Display (renderArgs)
 import Modal.Formulas (ModalFormula)
@@ -28,12 +29,30 @@ import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
 
+newtype Value = V String deriving (Eq, Ord)
+
+instance Read Value where
+  readsPrec _ s = case parse (parser <* eof) "reading value" (Text.pack s) of
+    Right result -> [(result, "")]
+    Left err -> []
+
+instance IsString Value where
+  fromString = V
+
+instance Show Value where
+  show (V val) = val
+
+instance Parsable Value where
+  parser = V <$> valueStr
+
+-------------------------------------------------------------------------------
+
 data VarVal = Number Int | Action Value | Outcome Value deriving (Eq, Ord, Read)
 
 instance Show VarVal where
     show (Number n) = '#' : show n
-    show (Action v) = '@' : v
-    show (Outcome v) = '$' : v
+    show (Action v) = '@' : show v
+    show (Outcome v) = '$' : show v
 
 asN :: MonadCompile m =>  Name -> VarVal -> m Int
 asN _ (Number i) = return i
@@ -49,13 +68,15 @@ asClaim n _ = refError $ ExpectingClaim n
 
 data ClaimType = ActionT | OutcomeT deriving (Eq, Ord, Read, Enum)
 
+-- TODO: naming schema kinda sucks.
+-- This is especially evident when the universe has an universe-output
+-- enumeration that excludes values seen in the code, in which case the error
+-- message refers to this as an "action enumeration." (This is confusing
+-- because we think of the universe as outputing outcomes rather than actions,
+-- but vise versa for agents.)
 instance Show ClaimType where
     show ActionT = "action"
     show OutcomeT = "outcome"
-
-instance Parsable ClaimType where
-    parser =   try (keyword "action" $> ActionT)
-           <|> (keyword "outcome" $> OutcomeT)
 
 -------------------------------------------------------------------------------
 
@@ -191,29 +212,31 @@ data Call = Call
   } deriving (Eq, Ord)
 
 instance Show Call where
-  show (Call n args kwargs as os) = n ++ paramstr where
-    paramstr = printf "(%s%s%s)%s%s" argstr mid kwargstr actsstr outsstr
-    argstr = renderArgs id args
+  show (Call n args kwargs as os) = n ++ controlstr where
+    controlstr = printf "%s%s%s" paramstr actsstr outsstr
+    paramstr = if null args && Map.null kwargs then ("" :: String)
+      else printf "(%s%s%s)" argstr mid kwargstr
+    argstr = renderArgs show args
     mid = if List.null args || Map.null kwargs then "" else "," :: String
-    kwargstr = renderArgs (uncurry $ printf "%s=%s") (Map.toAscList kwargs)
+    kwargstr = renderArgs (\(k, v) -> printf "%s=%s" k (show v)) (Map.toAscList kwargs)
     actsstr = case (as, os) of
       ([], []) -> "" :: String
       ([], _) -> "[...]"
-      (_, _) -> printf "[%s]" (renderArgs id as)
-    outsstr = if null os then "" :: String else printf "[%s]" (renderArgs id os)
+      (_, _) -> printf "[%s]" (renderArgs show as)
+    outsstr = if null os then "" :: String else printf "[%s]" (renderArgs show os)
 
 instance Parsable Call where
   parser = do
-    n <- value
+    n <- valueStr
     (args, kwargs) <- option ([], Map.empty) (try argsParser)
     as <- option [] (try valuesParser)
     os <- option [] (try valuesParser)
     return $ Call n args kwargs as os
     where
-      valuesParser = try (brackets (string "...") $> []) <|> listParser value
+      valuesParser = try (brackets (string "...") $> []) <|> listParser parser
       argsParser = parens argsAndKwargs where
-        argOrKwarg = try (Right <$> kwarg) <|> (Left <$> value)
-        kwarg = (,) <$> name <*> (symbol "=" *> value)
+        argOrKwarg = try (Right <$> kwarg) <|> (Left <$> parser)
+        kwarg = (,) <$> name <*> (symbol "=" *> parser)
         argsAndKwargs = do
           (args, kwargs) <- partitionEithers <$> (argOrKwarg `sepEndBy` comma)
           return (args, Map.fromList kwargs)
@@ -259,7 +282,7 @@ instance Parsable ParsedClaim where
     pclaim = ParsedClaim <$>
       name <*>
       maybeCall <*>
-      relationParser (refParser value)
+      relationParser (refParser parser)
     maybeCall =   try (symbol "()" $> Nothing)
               <|> try (Just <$> parens parser)
               <|> pure Nothing
@@ -268,14 +291,14 @@ _testParsedClaimParser :: IO ()
 _testParsedClaimParser = do
   let succeeds = verifyParser (parser :: Parser ParsedClaim)
   let fails = verifyParserFails (parser :: Parser ParsedClaim)
-  succeeds "A=val" (ParsedClaim "A" Nothing (Equals $ Lit "val"))
+  succeeds "A=val" (ParsedClaim "A" Nothing (Equals $ Lit $ "val"))
   fails    "X=y=z"
   succeeds "A=&a" (ParsedClaim "A" Nothing (Equals $ Ref "a"))
   succeeds "A()=&a" (ParsedClaim "A" Nothing (Equals $ Ref "a"))
   succeeds "A(B(a))=&a" (ParsedClaim "A"
     (Just (Call "B" ["a"] Map.empty [] [])) (Equals $ Ref "a"))
   succeeds "Xxx(B(a)[...][x]) in {&a, b, &c}" (ParsedClaim "Xxx"
-    (Just (Call "B" ["a"] Map.empty [] ["x"])) (In [Ref "a", Lit "b", Ref "c"]))
+    (Just (Call "B" ["a"] Map.empty [] ["x"])) (In [Ref "a", Lit $ "b", Ref "c"]))
   fails    "X(f(g(h(x))))=value"
 
 -------------------------------------------------------------------------------
@@ -288,9 +311,9 @@ data CompiledClaim = CompiledClaim
   } deriving (Eq, Ord, Read)
 
 instance Show CompiledClaim where
-  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n showo showt v where
+  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n showo showt (show v) where
     showo = maybe "" show o
-    showt = maybe ("" :: String) (printf "%s " . tSymbol) t
+    showt = maybe ("" :: String) (printf "%c" . tSymbol) t
     tSymbol ActionT = '@'
     tSymbol OutcomeT = '$'
 
@@ -387,18 +410,21 @@ instance Show ArgumentError where
   show (ArgIsNotNum n v) =
     printf "argument type mismatch for %s: expected a number, got %s" n (show v)
   show (ArgIsNotIn n v vs) =
-    printf "argument type mismatch for %s: expected one of {%s}, got %s" n (renderArgs id vs) (show v)
+    printf "argument type mismatch for %s: expected one of {%s}, got %s"
+      n (renderArgs show vs) (show v)
 
 data EnumError
   = EnumMissing
-  | EnumExcludes (Set Value)
+  | EnumExcludes [Value] (Set Value)
   | EnumMismatch [Value] [Value]
   deriving (Eq, Ord, Read)
 
 instance Show EnumError where
   show EnumMissing = "enumeration missing."
-  show (EnumExcludes vs) =
-    printf "enumeration excludes {%s}, used in the code" (renderArgs show $ Set.toList vs)
+  show (EnumExcludes xs vs) =
+    printf "enumeration {%s} excludes {%s}, used in the code"
+      (renderArgs show xs)
+      (renderArgs show $ Set.toList vs)
   show (EnumMismatch vs ws) =
     printf "enumeration mismatch: [%s] / [%s]" (renderArgs show vs) (renderArgs show ws)
 
@@ -427,7 +453,8 @@ data DefError
 
 instance Show DefError where
   show (IsUnmodalized s) = printf "unmodalized statement: %s" (show s)
-  show (InvalidValue t v vs) = printf "invalid %s %s: expected one of [%s]" (show t) (show v) (renderArgs id vs)
+  show (InvalidValue t v vs) = printf "invalid %s %s: expected one of [%s]"
+    (show t) (show v) (renderArgs show vs)
   show (InvalidClaim c s) = printf "invalid claim: %s (%s)" (show c) s
 
 data CompileError

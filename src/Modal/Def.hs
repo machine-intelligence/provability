@@ -54,7 +54,7 @@ instance Show Def where show = defName
 
 defHeadParser :: DefConfig -> Parser (Code -> Def)
 defHeadParser conf = makeDef where
-  makeDef = flip Def <$> value <*> option [] (try argsParser)
+  makeDef = flip Def <$> valueStr <*> option [] (try argsParser)
   argsParser = parens (arg `sepBy` comma) where
     arg = try num <|> try act <|> try out
     param kwd t p = (,,) <$>
@@ -62,8 +62,8 @@ defHeadParser conf = makeDef where
       return t <*>
       optional (symbol "=" *> p)
     num = param "number" NumberT (Number <$> parser)
-    act = param (defActionKw conf) (ClaimT ActionT) (Action <$> value)
-    out = param (defOutcomeKw conf) (ClaimT OutcomeT) (Outcome <$> value)
+    act = param (defActionKw conf) (ClaimT ActionT) (Action <$> parser)
+    out = param (defOutcomeKw conf) (ClaimT OutcomeT) (Outcome <$> parser)
 
 defParser :: DefConfig -> Parser Def
 defParser = fmap fst . defParserWithExtras (pure ())
@@ -88,7 +88,7 @@ defParserWithExtras px conf = keyword (defKw conf) *> (try mapDef <|> codeDef) w
 ensureEnumContains :: MonadError EnumError m => [Value] -> [Value] -> m ()
 ensureEnumContains xs enum =
   let missing = Set.fromList xs \\ Set.fromList enum
-  in unless (Set.null missing) (throwError $ EnumExcludes missing)
+  in unless (Set.null missing) (throwError $ EnumExcludes enum missing)
 
 -- Checks that the first list and the second list are equivalent up to
 -- ordering, where an empty list is treated as missing (and ignored). Returns
@@ -178,11 +178,11 @@ initialVariables defname (as, os) vars args kwargs = updateVars where
   cast vname NumberT v = maybe
     (throwError $ ArgErr defname $ ArgIsNotNum vname v)
     (return . Number)
-    (readMaybe v)
-  cast vname (ClaimT ActionT) v = if v `elem` as
+    (readMaybe $ show v)
+  cast vname (ClaimT ActionT) v = if v `notElem` as
     then throwError $ ArgErr defname $ ArgIsNotIn vname v as
     else return $ Action v
-  cast vname (ClaimT OutcomeT) v = if v `elem` os
+  cast vname (ClaimT OutcomeT) v = if v `notElem` os
     then throwError $ ArgErr defname $ ArgIsNotIn vname v os
     else return $ Outcome v
 

@@ -155,7 +155,7 @@ data CodeFragment
   | LetN Name SimpleExpr
   | If Statement [CodeFragment]
   | IfElse Statement [CodeFragment] [CodeFragment]
-  | Return (Maybe (Ref Name))
+  | Return (Maybe (Ref Value))
   | Pass
   deriving Eq
 
@@ -207,7 +207,7 @@ codeFragmentParser conf = try indent *> pFrag where
   pForO = pFor OutcomeT outcome outcomes
   pFor t x xs = For t
     <$> (keyword "for" *> keyword x *> varname)
-    <*> (keyword "in" *> rangeParser xs value <* w <* newline)
+    <*> (keyword "in" *> rangeParser xs parser <* w <* newline)
     <*> pBlock
   pForN = ForN
     <$> (keyword "for" *> keyword "number" *> varname)
@@ -227,7 +227,7 @@ codeFragmentParser conf = try indent *> pFrag where
   pPass = symbol "pass" $> Pass <* w <* eol
   pReturn = try returnThing <|> returnNothing <?> "a return statement"
   returnNothing :: Parser CodeFragment
-  returnThing = symbol "return " *> (Return . Just <$> refParser value) <* w <* eol
+  returnThing = symbol "return " *> (Return . Just <$> parser) <* w <* eol
   returnNothing = symbol "return" $> Return Nothing <* w <* eol
   action = actionKw $ codeConfig conf
   outcome = outcomeKw $ codeConfig conf
@@ -269,7 +269,7 @@ data Code
 instance Blockable Code where
   blockLines (Code frags) = concatMap blockLines frags
   blockLines (ActionMap a2s) = [
-    (0, Text.pack $ printf "%s ↔ %s" a (show s)) | (a, s) <- Map.toList a2s]
+    (0, Text.pack $ printf "%s ↔ %s" (show a) (show s)) | (a, s) <- Map.toList a2s]
 
 instance Show Code where
   show = Text.unpack . renderBlock
@@ -352,7 +352,7 @@ codeMapParser = ActionMap . Map.fromList <$> many1 assignment where
   indent = (many (w *> newline)) *> char '\t'
   iffParsers = [symbol "↔", symbol "<->", keyword "iff"]
   pIff = void $ choice $ map try iffParsers
-  assignment = (,) <$> (indent *> value <* pIff) <*> (parser <* eols)
+  assignment = (,) <$> (indent *> parser <* pIff) <*> (parser <* eols)
 
 _testCodeMapParser :: IO ()
 _testCodeMapParser = testAllSamples where
