@@ -229,12 +229,14 @@ printMultiHeader ctrls call0 calls = unless (ctrlHidden ctrls) doDisplay where
 printCompetitionTable :: Show v => Controls -> Map v (ModalFormula v) -> IO ()
 printCompetitionTable ctrls cmap =
   (when $ ctrlShowMap ctrls && not (ctrlHidden ctrls))
-    (displayTable $ indentTable "  " $ tuplesToTable $ Map.toAscList cmap)
+    (putStrLn "\n  Full combat map:" >>
+      (displayTable $ indentTable "    " $ tuplesToTable $ Map.toAscList cmap))
 
 printKripkeTable :: (Ord v, Show v) => Controls -> Map v (ModalFormula v) -> IO ()
 printKripkeTable ctrls cmap =
   (when $ ctrlShowFrames ctrls && not (ctrlHidden ctrls))
-    (displayTable $ indentTable "  " $ kripkeTable cmap)
+    (putStrLn "\n  Kripke frames:" >>
+      (displayTable $ indentTable "    " $ kripkeTable cmap))
 
 printVsResults :: (Show a, Show b) => Controls -> Call -> a -> Call -> b -> IO ()
 printVsResults ctrls call1 r1 call2 r2 =
