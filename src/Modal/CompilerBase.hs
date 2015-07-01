@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 module Modal.CompilerBase where
@@ -7,13 +8,14 @@ import Control.Arrow (first)
 import Control.Applicative
 import Control.Monad.Except hiding (mapM, sequence)
 import Control.Monad.State hiding (mapM, sequence, state)
+import Data.Either (partitionEithers)
 import Data.Foldable
 import Data.Map (Map)
 import Data.Set (Set)
 import Data.Traversable
 import Modal.Display (renderArgs)
 import Modal.Formulas (ModalFormula)
-import Modal.Parser
+import Modal.Parser hiding (main)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Text (Parser)
@@ -83,6 +85,17 @@ instance Show a => Show (Ref a) where
 instance Parsable a => Parsable (Ref a) where
   parser = refParser parser
 
+_testRefParser :: IO ()
+_testRefParser = do
+  let succeeds = verifyParser (parser :: Parser (Ref Int))
+  let fails = verifyParserFails (parser :: Parser (Ref Int))
+  succeeds "&reference" (Ref "reference")
+  fails    "&123"
+  succeeds "&_123" (Ref "_123")
+  succeeds "3" (Lit 3)
+  fails    "hello"
+  fails    "3four5"
+
 lit :: Ref a -> Maybe a
 lit (Lit a) = Just a
 lit (Ref _) = Nothing
@@ -122,6 +135,18 @@ instance Traversable Relation where
 instance (Ord a, Parsable a) => Parsable (Relation a) where
   parser = relationParser parser
 
+_testRelationParser :: IO ()
+_testRelationParser = do
+  let succeeds = verifyParser (parser :: Parser (Relation Int))
+  let fails = verifyParserFails (parser :: Parser (Relation Int))
+  succeeds "=3" (Equals 3)
+  fails    "=A"
+  succeeds "≠0" (NotEquals 0)
+  succeeds "in {1, 2, 3}" (In [1, 2, 3])
+  fails    "in {1,"
+  succeeds "not in {1, 2, 3}" (NotIn [1, 2, 3])
+  succeeds " ∈ {1,}" (In [1])
+
 relationParser :: Parser x -> Parser (Relation x)
 relationParser p = go where
   go =   try (Equals <$> (sEquals *> p))
@@ -145,7 +170,7 @@ relationParser p = go where
         <?> "a membership test"
   sNotIn = void sym where
     sym =   try (symbol "∉")
-        <|> try (keyword "notin")
+        <|> try (keyword "not" *> keyword "in")
         <?> "an absence test"
   set = braces $ sepEndBy p comma
 
@@ -166,26 +191,52 @@ data Call = Call
   } deriving (Eq, Ord)
 
 instance Show Call where
-  show (Call n args kwargs _ _) = n ++ paramstr where
-    paramstr = printf "(%s%s%s)" argstr mid kwargstr
+  show (Call n args kwargs as os) = n ++ paramstr where
+    paramstr = printf "(%s%s%s)%s%s" argstr mid kwargstr actsstr outsstr
     argstr = renderArgs id args
     mid = if List.null args || Map.null kwargs then "" else "," :: String
     kwargstr = renderArgs (uncurry $ printf "%s=%s") (Map.toAscList kwargs)
+    actsstr = case (as, os) of
+      ([], []) -> "" :: String
+      ([], _) -> "[...]"
+      (_, _) -> printf "[%s]" (renderArgs id as)
+    outsstr = if null os then "" :: String else printf "[%s]" (renderArgs id os)
 
 instance Parsable Call where
   parser = do
     n <- value
     (args, kwargs) <- option ([], Map.empty) (try argsParser)
-    as <- option [] valuesParser
-    os <- option [] valuesParser
+    as <- option [] (try valuesParser)
+    os <- option [] (try valuesParser)
     return $ Call n args kwargs as os
     where
       valuesParser = try (brackets (string "...") $> []) <|> listParser value
-      argsParser = parens argsThenKwargs where
-        argsThenKwargs = (,) <$> allArgs <*> allKwargs
-        allArgs = value `sepEndBy` comma
-        allKwargs = Map.fromList <$> (kwarg `sepEndBy` comma)
+      argsParser = parens argsAndKwargs where
+        argOrKwarg = try (Right <$> kwarg) <|> (Left <$> value)
         kwarg = (,) <$> name <*> (symbol "=" *> value)
+        argsAndKwargs = do
+          (args, kwargs) <- partitionEithers <$> (argOrKwarg `sepEndBy` comma)
+          return (args, Map.fromList kwargs)
+
+_testCallParser :: IO ()
+_testCallParser = do
+  let succeeds = verifyParser (parser :: Parser Call)
+  let fails = verifyParserFails (parser :: Parser Call)
+  succeeds "Name" (Call "Name" [] Map.empty [] [])
+  succeeds "A-B()" (Call "A-B" [] Map.empty [] [])
+  fails    "Name!#-"
+  succeeds "A(x, y, z)" (Call "A" ["x", "y", "z"] Map.empty [] [])
+  succeeds "A(arg, kwarg=1)" (Call "A" ["arg"] (Map.fromList [("kwarg", "1")]) [] [])
+  succeeds "A(x=1, a, y=2, b,)" (Call "A" ["a", "b"] (Map.fromList
+    [("x", "1"), ("y", "2")]) [] [])
+  fails    "A(a a a )"
+  succeeds "A()[x, y]" (Call "A" [] Map.empty ["x", "y"] [])
+  succeeds "A()[x, y][a, b]" (Call "A" [] Map.empty ["x", "y"] ["a", "b"])
+  succeeds "A()[][a, b]" (Call "A" [] Map.empty [] ["a", "b"])
+  succeeds "A()[...][a, b]" (Call "A" [] Map.empty [] ["a", "b"])
+  succeeds "A()[...][...]" (Call "A" [] Map.empty [] [])
+  succeeds "A()[x, y][...]" (Call "A" [] Map.empty ["x", "y"] [])
+  fails    "A()[][][]"
 
 instance Read Call where
   readsPrec _ s = case parse (parser <* eof) "reading call" (Text.pack s) of
@@ -204,13 +255,28 @@ instance Show ParsedClaim where
   show (ParsedClaim n o r) = printf "%s(%s)%s" n (maybe "" show o) (show r)
 
 instance Parsable ParsedClaim where
-  parser = ParsedClaim <$>
-             name <*>
-             maybeCall <*>
-             relationParser (refParser value)
-             where maybeCall = try (symbol "()" $> Nothing)
-                             <|> try (Just <$> parens parser)
-                             <|> pure Nothing
+  parser = try pclaim <?> "a claim about an agent" where
+    pclaim = ParsedClaim <$>
+      name <*>
+      maybeCall <*>
+      relationParser (refParser value)
+    maybeCall =   try (symbol "()" $> Nothing)
+              <|> try (Just <$> parens parser)
+              <|> pure Nothing
+
+_testParsedClaimParser :: IO ()
+_testParsedClaimParser = do
+  let succeeds = verifyParser (parser :: Parser ParsedClaim)
+  let fails = verifyParserFails (parser :: Parser ParsedClaim)
+  succeeds "A=val" (ParsedClaim "A" Nothing (Equals $ Lit "val"))
+  fails    "X=y=z"
+  succeeds "A=&a" (ParsedClaim "A" Nothing (Equals $ Ref "a"))
+  succeeds "A()=&a" (ParsedClaim "A" Nothing (Equals $ Ref "a"))
+  succeeds "A(B(a))=&a" (ParsedClaim "A"
+    (Just (Call "B" ["a"] Map.empty [] [])) (Equals $ Ref "a"))
+  succeeds "Xxx(B(a)[...][x]) in {&a, b, &c}" (ParsedClaim "Xxx"
+    (Just (Call "B" ["a"] Map.empty [] ["x"])) (In [Ref "a", Lit "b", Ref "c"]))
+  fails    "X(f(g(h(x))))=value"
 
 -------------------------------------------------------------------------------
 
@@ -222,7 +288,8 @@ data CompiledClaim = CompiledClaim
   } deriving (Eq, Ord, Read)
 
 instance Show CompiledClaim where
-  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n (maybe "" show o) showt v where
+  show (CompiledClaim n o t v) = printf "%s(%s)=%s%s" n showo showt v where
+    showo = maybe "" show o
     showt = maybe ("" :: String) (printf "%s " . tSymbol) t
     tSymbol ActionT = '@'
     tSymbol OutcomeT = '$'
@@ -405,3 +472,14 @@ instance Show RuntimeError where
   show (FileErr f g) = printf "error in %s: %s" f (show g)
   show (ExecErr f x r) = printf "error running %s in %s: %s" x f (show r)
   show (CompileErr f c) = printf "error running %s: %s" f (show c)
+
+-------------------------------------------------------------------------------
+-- Testing
+
+main :: IO ()
+main = do
+  _testRefParser
+  _testRelationParser
+  _testCallParser
+  _testParsedClaimParser
+  putStrLn ""

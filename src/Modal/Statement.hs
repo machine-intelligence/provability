@@ -7,13 +7,16 @@
 module Modal.Statement where
 import Prelude hiding (readFile, sequence, mapM, foldr1, concat, concatMap)
 import Control.Applicative
-import Modal.CompilerBase
+import Modal.CompilerBase hiding (main)
 import Modal.Formulas (ModalFormula)
-import Modal.Parser
+import Modal.Parser hiding (main)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Expr
+import Text.Parsec.Text (Parser)
 import Text.Printf (printf)
+import qualified Data.Map as M
+import qualified Data.Text as T
 import qualified Modal.Formulas as F
 
 -------------------------------------------------------------------------------
@@ -73,10 +76,10 @@ instance Parsable Statement where
   parser = buildExpressionParser lTable term where
     lTable =
       [ [Prefix lNeg]
-      , [Infix lAnd AssocRight]
-      , [Infix lOr AssocRight]
-      , [Infix lImp AssocRight]
-      , [Infix lIff AssocRight] ]
+      , [ Infix lAnd AssocRight ]
+      , [ Infix lOr AssocRight ]
+      , [ Infix lImp AssocRight ]
+      , [ Infix lIff AssocRight ] ]
     term
       =   parens parser
       <|> try cConsistent
@@ -84,6 +87,7 @@ instance Parsable Statement where
       <|> try (fPossible <*> quoted parser)
       <|> try (Var <$> parser)
       <|> try (Val <$> val)
+      <?> "a statement term"
     val = try sTop <|> try sBot <?> "a boolean value" where
       sTop = sym $> True where
         sym =   try (symbol "⊤")
@@ -100,6 +104,7 @@ instance Parsable Statement where
             <?> "falsehood"
     lNeg = sym $> Neg where
       sym =   try (symbol "¬")
+          <|> try (symbol "~")
           <|> try (keyword "not")
           <?> "a negation"
     lAnd = sym $> And where
@@ -126,17 +131,17 @@ instance Parsable Statement where
           <|> try (symbol "<->")
           <|> try (keyword "iff")
           <?> "a biconditional"
-    cConsistent = (symbol "Con" $> Consistent) <*> option (Lit 0) parser
+    cConsistent = (symbol "Con" $> Consistent) <*> option (Lit 0) (parens parser)
     quoted x
       =   try (between (symbol "⌜") (symbol "⌝") x)
       <|> try (between (symbol "[") (symbol "]") x)
     fProvable = try inSym <|> choice (map (try . afterSym) syms) <?> "a box" where
       inSym = Provable <$> (char '[' *> option (Lit 0) parser <* char ']')
-      afterSym s = Provable <$> (symbol s  *> option (Lit 0) parser)
+      afterSym s = Provable <$> (symbol s *> option (Lit 0) (parens parser))
       syms = ["□", "Provable", "Box"]
     fPossible = try inSym <|> choice (map (try . afterSym) syms) <?> "a diamond" where
       inSym = Possible <$> (char '<' *> option (Lit 0) parser <* char '>')
-      afterSym s = Possible <$> (symbol s  *> option (Lit 0) parser)
+      afterSym s = Possible <$> (symbol s  *> option (Lit 0) (parens parser))
       syms = ["◇", "Possible", "Dia", "Diamond"]
 
 claimsParsed :: Statement -> [ParsedClaim]
@@ -167,3 +172,44 @@ compileStatement handleVar stm = case stm of
   Provable r x -> F.boxk <$> lookupN r <*> rec x
   Possible r x -> F.diak <$> lookupN r <*> rec x
   where rec = compileStatement handleVar
+
+-------------------------------------------------------------------------------
+-- Testing
+
+main :: IO ()
+main = do
+  let fails = verifyParserFails (parser :: Parser Statement)
+  let simpleClaim = ParsedClaim "A" Nothing (Equals $ Lit "a")
+  verifyParsable "⊤" (Val True)
+  verifyParsable "⊥" (Val False)
+  fails          "a"
+  verifyParsable "A()=a" (Var simpleClaim)
+  verifyParsable "¬A()=a" (Neg $ Var simpleClaim)
+  verifyParsable "A()=a ∧ A()=a" (And (Var simpleClaim) (Var simpleClaim))
+  verifyParsable "A()=a∨A()=a" (Or (Var simpleClaim) (Var simpleClaim))
+  verifyParsable "A()=a  →  A()=a" (Imp (Var simpleClaim) (Var simpleClaim))
+  verifyParsable "(⊤ ∨ ⊥) ∧ (⊤ ∨ ⊥)" (And
+    (Or (Val True) (Val False)) (Or (Val True) (Val False)))
+  verifyParsable "⊤ ∧ ⊤ ∨ ⊥ ∧ ⊥" (Or
+    (And (Val True) (Val True)) (And (Val False) (Val False)))
+  verifyParsable "⊤ → ⊥ ∧ ⊥" (Imp (Val True) (And (Val False) (Val False)))
+  verifyParsable "⊤↔⊥" (Iff (Val True) (Val False))
+  fails          "x ∧ ∨ y"
+  verifyParsable "Con(1)" (Consistent (Lit 1))
+  verifyParsable "Con(&n)" (Consistent (Ref "n"))
+  fails          "Con 1"
+  verifyParsable "□⌜⊤⌝" (Provable (Lit 0) (Val True))
+  verifyParsable "[][top]" (Provable (Lit 0) (Val True))
+  verifyParsable "[1][top]" (Provable (Lit 1) (Val True))
+  verifyParsable "Provable[top]" (Provable (Lit 0) (Val True))
+  verifyParsable "Provable(1)[top]" (Provable (Lit 1) (Val True))
+  verifyParsable "◇⌜⊤⌝" (Possible (Lit 0) (Val True))
+  verifyParsable "<>[top]" (Possible (Lit 0) (Val True))
+  verifyParsable "<1>[top]" (Possible (Lit 1) (Val True))
+  verifyParsable "Possible[top]" (Possible (Lit 0) (Val True))
+  verifyParsable "Possible(1)[top]" (Possible (Lit 1) (Val True))
+  verifyParsable "Con(1) implies ¬□⌜⊥⌝" (Imp
+    (Consistent (Lit 1)) (Neg (Provable (Lit 0) (Val False))))
+  verifyParsable "Con(1) implies ~[][bottom]" (Imp
+    (Consistent (Lit 1)) (Neg (Provable (Lit 0) (Val False))))
+  putStrLn ""

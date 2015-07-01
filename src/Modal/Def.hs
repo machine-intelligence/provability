@@ -54,7 +54,7 @@ instance Show Def where show = defName
 
 defHeadParser :: DefConfig -> Parser (Code -> Def)
 defHeadParser conf = makeDef where
-  makeDef = flip Def <$> name <*> option [] (try argsParser)
+  makeDef = flip Def <$> value <*> option [] (try argsParser)
   argsParser = parens (arg `sepBy` comma) where
     arg = try num <|> try act <|> try out
     param kwd t p = (,,) <$>
@@ -75,13 +75,11 @@ defParserWithExtras px conf = keyword (defKw conf) *> (try mapDef <|> codeDef) w
     h <- defHeadParser conf
     x <- px
     c <- codeMapParser
-    end
     return (h c, x)
   codeDef = do
     h <- defHeadParser conf
     x <- px
     c <- codeParser (makeCodeConfig conf)
-    end
     return (h c, x)
 
 -------------------------------------------------------------------------------
@@ -149,7 +147,7 @@ effectiveAOs valsIn code call = (preferR codeAs callAs, preferR codeOs callOs) w
   (callAs, callOs) = (callActions call, callOutcomes call)
   (codeAs, codeOs) = codeAOs valsIn code
   preferR xs ys = if null ys then xs else ys
-  
+
 -------------------------------------------------------------------------------
 
 initialVariables :: MonadError CompileError m =>

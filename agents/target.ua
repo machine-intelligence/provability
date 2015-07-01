@@ -1,159 +1,67 @@
-%------------------------------------------------------------------------
-% □ Line comments
-% □ Block comments
-% ✓ Extend Bivar
-% ✓ Extend Multivar
-% ✓ Outer variables don't need # signs
-% ✓ Inner variables use & signs
-% ✓ Statement variables must be prefixed with @ or $
-% ✓ Argument types become single-character
-% ✓ For loops use special characters
-% ✓ Fix defParser
-% ✓ Refactor map parser
-% □ Allow outcome extraction from map
-% □ Agent
-% □ universe
-% □ Bot
-% ✓ Fix MultiVar competition display
-% □ Add environment parsing
-% □ Add with parser
-% □ Add combat
-% □ Add compete
-% □ Add challenge
-% □ test: UDT-ish agent that delegates.
-% □ test: Universe that delegates.
-% □ test: UDT-ish agent that iterates numbers.
+--------------------------------------------------------------------------
+-- This is our standard modal version of UDT.
+-- (Parameterized by default action, staring proof level, and proof escalation
+-- amount.)
 
-% 4. Vim syntax files
-% This is UDT.
-% You can make it escalate or whatever.
-
-agent UDT(@default, #start=0, #step=0):
-  let level = start
-  for o in $[...]
-    for a in @[...]
-       if □⌜Me()=&a → Them()=&o⌝
-         return a
-       end
-       let level = level + step
-     end
-  end
-  return default
-end
+theory UDT(action default, number level=0, number step=0)
+	let &n = &level
+	for outcome &o in outcomes
+		for action &a in actions
+			if [&n]⌜Me()=&a → Them()=&o⌝
+				return a
+			let &n = &n + 1
+	return &default
 
 --------------------------------------------------------------------------
--- Some simple problems.
+-- Here are some simple decision problems.
 
-universe FiveAndTen @[5, 10] $[10, 5]:
-  if A()=@5
-    return $5
-  end
-  return $10
-end
+problem FiveAndTen [5, 10] [10, 5]
+	if A()=5
+		return $5
+	return $10
 
-universe EasyNewcomb $[1001000, 1000000, 1000, 0]:
-  if A()=@2 and A()=@1
-     return $1001000
-  end
-  if A()=@1 and A()=@1
-     return $1000000
-  end
-  if A()=@2
-     return $1000
-  end
-  return $0
-end
+problem Newcomb(number level=0) [1, 2] [$1001000, $1000000, $1000, $0]
+	if A()=2 and [&level]⌜A()=1⌝
+		return $1001000
+	if A()=1 and [&level]⌜A()=1⌝
+		return $1000000
+	if A()=2
+		return $1000
+	return $0
 
-universe Newcomb(number level=0) $[1001000, 1000000, 1000, 0]:
-  if A()=@2 and [#level]⌜A()=@1⌝
-     return $1001000
-  end
-  if A()=@1 and [#level]⌜A()=@1⌝
-     return $1000000
-  end
-  if A()=@2
-     return $1000
-  end
-  return $0
-end
+problem map 5and10 [5, 10] [$10, $5]
+	$5 ↔ A()=5
+	$10 ↔ A()=10
 
-universe map 5and10:
-  $5 ↔ A()=@5,
-  $10 ↔ A()=@10,
-end
-
-universe map PD:
-  $DC ↔ A1()=@D and A2()=@C,
-  $CC ↔ A1()=@C and A2()=@C,
-  $DD ↔ A1()=@D and A2()=@D,
-  $CD ↔ A1()=@C and A2()=@D,
-end
-
+problem map PD [C, D] [$DC, $CC, $DD, $CD]
+	$DC ↔ A1()=@D and A2()=@C
+	$CC ↔ A1()=@C and A2()=@C
+	$DD ↔ A1()=@D and A2()=@D
+	$CD ↔ A1()=@C and A2()=@D
 
 bot CooperateBot = ⊤
 
 bot DefectBot = ⊥
 
-agent FairBot @[C, D] $[C, D]:
-  if □⌜Them(Me)=$C⌝
-    return @C
-  end
-  return @D
-end
+agent FairBot
+	if □⌜Them(Me)=C⌝
+		return C
+	return D
 
-competition env PDbase:
-  CooperateBot as CB,
-  DefectBot as DB,
-  FairBot as FB,
-end
+agent PrudentBot
+	if [1]⌜Them(DB)=D⌝ and □⌜Them(Me)=C⌝
+		return C
+	return D
 
-agent PrudentBot @[C, D] $[C, D]:
-  if [1]⌜Them(DB)=$D⌝ and □⌜Them(Me)=$C⌝
-    return @C
-  end
-  return $D
-end
+combat with frames! PB vs FB
 
-competition env PDbots extends PDbase:
-  PrudentBot as PB
-end
+compete: PB vs FB
 
-combat in PDbots with frames: PB, FB.
-compete with map with frames: CooperateBot, FB from Standard.
-
-play with map with frames:
-  FiveAndTen as U,
-  UDT(@5) as A
-end
-
-play:
-  EasyNewcomb as U,
-  UDT(@2, step=1) as A
-end
-
-play:
-  Newcomb(0) as U,
-  UDT(@2, level=10, step=1) as A
-end
-
-play:
-  5and10 as U,
-  UDT(@5) as A
-end
-
-play:
-  PD,
-  UDT(@D, step=1)[@C, @D][$DC, $CC, $DD, $CD] as A1,
-  UDT(@D, step=1)[@C, @D][$CD, $CC, $DD, $DC] as A2
-end
-
-
-% agent {name} [args] [acts] [outs] {code}
-% agent map {name} [args] [outs] {map}
-% universe {name} [args] [acts] [outs] {code}
-% universe map {name} [args] [outs] {map}
-% bot {name} = {forumla}
-% combat in {env} [with maps | frames] {name} {name}
-% compete [with maps | frames] {call a} {call a}
-% challenge [with maps | frames] {call u} {call a...}
-% environment {call}
+play with map with frames: FiveAndTen, UDT(5).
+play: Newcomb, UDT(2, step=1).
+play: Newcomb(1), UDT(2, level=10, step=1).
+play: 5and10, UDT(5).
+play: 5and10, UDT(10).
+play: PD,
+	UDT(D, step=1)[...][$DC, $CC, $DD, $CD],
+	UDT(D, step=1)[...][$CD, $CC, $DD, $DC].

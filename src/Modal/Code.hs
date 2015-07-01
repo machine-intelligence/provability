@@ -11,12 +11,12 @@ import Data.Maybe (mapMaybe, maybeToList)
 import Data.Monoid ((<>))
 import Data.Foldable
 import Data.Traversable
-import Modal.CompilerBase
+import Modal.CompilerBase hiding (main)
 import Modal.Display
 import Modal.Formulas (ModalFormula, (%^), (%|))
-import Modal.Parser
+import Modal.Parser hiding (main)
 import Modal.Programming
-import Modal.Statement
+import Modal.Statement hiding (main)
 import Modal.Utilities
 import Text.Parsec hiding ((<|>), optional, many, State)
 import Text.Parsec.Expr
@@ -85,27 +85,53 @@ instance Show x => Show (Range x) where
     x = maybe ("" :: String) show msto
     y = maybe ("" :: String) (printf " by %s" . show) mste
   show (ListRange xs) = printf "[%s]" (List.intercalate ", " $ map show xs)
-  show TotalRange = "..."
+  show TotalRange = "[...]"
 
 instance Parsable x => Parsable (Range x) where
-  parser = rangeParser "..." parser
+  parser = rangeParser "[...]" parser
 
 rangeParser :: String -> Parser x -> Parser (Range x)
 rangeParser allname x = try rEnum <|> try rList <|> try rAll <?> "a range" where
     rEnum = EnumRange <$>
-      (refParser x <* symbol "..") <*>
-      optional (refParser x) <*>
+      (symbol "[" *> refParser x <* symbol "..") <*>
+      (optional (refParser x) <* symbol "]") <*>
       optional (try $ keyword "by" *> parser)
     rList = ListRange <$> listParser (refParser x)
     rAll = keyword allname $> TotalRange
 
+_testRangeParser :: IO ()
+_testRangeParser = do
+  let succeeds = verifyParser (parser :: Parser (Range Int))
+  let fails = verifyParserFails (parser :: Parser (Range Int))
+  succeeds "[1..]" (EnumRange (Lit 1) Nothing Nothing)
+  succeeds "[ 1 ..]" (EnumRange (Lit 1) Nothing Nothing)
+  succeeds "[ 1 .. 2 ]" (EnumRange (Lit 1) (Just (Lit 2)) Nothing)
+  succeeds "[&n..]" (EnumRange (Ref "n") Nothing Nothing)
+  succeeds "[&n..3]" (EnumRange (Ref "n") (Just (Lit 3)) Nothing)
+  succeeds "[&n..3] by 2" (EnumRange (Ref "n") (Just (Lit 3)) (Just (Lit 2)))
+  fails    "[1..2..3]"
+  succeeds "[1, 2, &three]" (ListRange [Lit 1, Lit 2, Ref "three"])
+  succeeds "[...]" TotalRange
+  succeeds "[ ]" (ListRange [])
+  fails    "[  "
+
 boundedRange :: Parsable x => Parser (Range x)
 boundedRange = try rBoundedEnum <|> try rList <?> "a bounded range" where
   rBoundedEnum = EnumRange <$>
-    (parser <* symbol "..") <*>
-    (Just <$> parser) <*>
+    (symbol "[" *> parser <* symbol "..") <*>
+    (Just <$> parser <* symbol "]") <*>
     optional (try $ keyword "by" *> parser)
   rList = ListRange <$> parser
+
+_testBoundedRangeParser :: IO ()
+_testBoundedRangeParser = do
+  let succeeds = verifyParser (boundedRange :: Parser (Range Int))
+  let fails = verifyParserFails (boundedRange :: Parser (Range Int))
+  fails    "[1..]"
+  succeeds "[1 .. 2]" (EnumRange (Lit 1) (Just (Lit 2)) Nothing)
+  succeeds "[&n .. 2] by 10" (EnumRange (Ref "n") (Just (Lit 2)) (Just (Lit 10)))
+  succeeds "[1, 2, &three]" (ListRange [Lit 1, Lit 2, Ref "three"])
+  fails    "[...]"
 
 rangeLitValues :: Range x -> [x]
 rangeLitValues (EnumRange sta sto _) =
@@ -124,8 +150,7 @@ compileRange getXs getX (EnumRange sta msto mste) = renum msto mste where
 -------------------------------------------------------------------------------
 
 data CodeFragment
-  = ForA Name (Range Value) [CodeFragment]
-  | ForO Name (Range Value) [CodeFragment]
+  = For ClaimType Name (Range Value) [CodeFragment]
   | ForN Name (Range Int) [CodeFragment]
   | LetN Name SimpleExpr
   | If Statement [CodeFragment]
@@ -135,11 +160,8 @@ data CodeFragment
   deriving Eq
 
 instance  Blockable CodeFragment where
-  blockLines (ForA n r cs) =
-    [(0, Text.pack $ printf "for action %s in %s" n (show r))] <>
-    increaseIndent (concatMap blockLines cs)
-  blockLines (ForO n r cs) =
-    [(0, Text.pack $ printf "for outcome %s in %s" n (show r))] <>
+  blockLines (For t n r cs) =
+    [(0, Text.pack $ printf "for %s %s in %s" (show t) n (show r))] <>
     increaseIndent (concatMap blockLines cs)
   blockLines (ForN n r cs) =
     [(0, Text.pack $ printf "for number %s in %s" n (show r))] <>
@@ -161,48 +183,63 @@ instance  Blockable CodeFragment where
 instance Show CodeFragment where
   show = Text.unpack . renderBlock
 
-codeFragmentParser :: CodeConfig -> Parser CodeFragment
-codeFragmentParser conf = pFrag where
-  pFrag =   try (pFor ForA action $ rangeParser actions value)
-        <|> try (pFor ForO outcome $ rangeParser outcomes value)
-        <|> try (pFor ForN "number" boundedRange)
+data CodeFragConfig = CodeFragConfig
+  { indentLevel :: Int
+  , codeConfig :: CodeConfig
+  } deriving (Eq, Ord, Read, Show)
+
+eatIndent :: CodeFragConfig -> Parser ()
+eatIndent conf = void (count (indentLevel conf) (char '\t'))
+  <?> printf "%d tabs" (indentLevel conf)
+
+codeFragmentParser :: CodeFragConfig -> Parser CodeFragment
+codeFragmentParser conf = try indent *> pFrag where
+  indent = (many $ try ignoredLine) *> eatIndent conf
+  pFrag =   try pForA
+        <|> try pForO
+        <|> try pForN
         <|> try pLetN
-        <|> try pIf
         <|> try pIfElse
+        <|> try pIf
         <|> try pReturn
         <|> try pPass
+  pForA = pFor ActionT action actions
+  pForO = pFor OutcomeT outcome outcomes
+  pFor t x xs = For t
+    <$> (keyword "for" *> keyword x *> varname)
+    <*> (keyword "in" *> rangeParser xs value <* w <* newline)
+    <*> pBlock
+  pForN = ForN
+    <$> (keyword "for" *> keyword "number" *> varname)
+    <*> (keyword "in" *> boundedRange <* w <* newline)
+    <*> pBlock
   pLetN = LetN
     <$> (keyword "let" *> varname <* symbol "=")
-    <*> parser
+    <*> parser <* eols
   pIf = If
-    <$> (keyword "if" *> parser)
-    <*> pBlock end
+    <$> (keyword "if" *> parser <* w <* newline)
+    <*> pBlock
   pIfElse = IfElse
-    <$> (keyword "if" *> parser)
-    <*> pBlock (keyword "else")
-    <*> pBlock end
-  pFor maker sym rparser = maker
-    <$> (keyword "for" *> varname)
-    <*> (keyword "in" *> symbol sym *> brackets rparser)
-    <*> pBlock end
-  pBlock ender =
-    try (ender $> []) <|> ((:) <$> codeFragmentParser conf <*> pBlock ender)
-  pPass = symbol "pass" $> Pass
+    <$> (keyword "if" *> parser <* w <* newline)
+    <*> pBlock
+    <*> (indent *> keyword "else" *> w *> newline *> pBlock)
+  pBlock = many1 $ try $ codeFragmentParser conf{indentLevel=succ $ indentLevel conf}
+  pPass = symbol "pass" $> Pass <* w <* eol
   pReturn = try returnThing <|> returnNothing <?> "a return statement"
   returnNothing :: Parser CodeFragment
-  returnThing = symbol "return " *> (Return . Just <$> refParser value)
-  returnNothing = symbol "return" $> Return Nothing
-  action = actionKw conf
-  outcome = outcomeKw conf
-  actions = actionsKw conf
-  outcomes = outcomesKw conf
+  returnThing = symbol "return " *> (Return . Just <$> refParser value) <* w <* eol
+  returnNothing = symbol "return" $> Return Nothing <* w <* eol
+  action = actionKw $ codeConfig conf
+  outcome = outcomeKw $ codeConfig conf
+  actions = actionsKw $ codeConfig conf
+  outcomes = outcomesKw $ codeConfig conf
   varname = char '&' *> name
 
 compileCodeFragment :: MonadCompile m =>
   CodeFragment -> m (PartialProgram Value CompiledClaim)
 compileCodeFragment code = case code of
-  ForA n r x -> loop (withA n) x =<< compileRange (gets actionList) lookupA r
-  ForO n r x -> loop (withO n) x =<< compileRange (gets outcomeList) lookupO r
+  For ActionT n r x -> loop (withA n) x =<< compileRange (gets actionList) lookupA r
+  For OutcomeT n r x -> loop (withO n) x =<< compileRange (gets outcomeList) lookupO r
   ForN n r x -> loop (withN n) x =<< compileRange (return [0..]) lookupN r
   LetN n x -> compileExpr x >>= modify . withN n >> return id
   If s block -> compileCodeFragment (IfElse s block [Pass])
@@ -238,12 +275,124 @@ instance Show Code where
   show = Text.unpack . renderBlock
 
 codeParser :: CodeConfig -> Parser Code
-codeParser conf = Code <$> many (codeFragmentParser conf)
+codeParser conf = Code <$> many1 (codeFragmentParser $ CodeFragConfig 1 conf)
+
+_testCodeParser :: IO ()
+_testCodeParser = testAllSamples where
+  sample1 = Text.unlines
+    ["\tlet &step = 0"
+    ,"\tfor action &a in actions"
+    ,"\t\t-- This is a comment about the inner loop."
+    ,"\t\tfor outcome &u in utilities"
+    ,"\t\t\tif [&step][A()=&a -> U()=&u]"
+    ,"\t\t\t\treturn &a"
+    ,"\t\t\tlet &step = &step + 1"
+    ,"\treturn"]
+  sample2 = Text.unlines
+    ["\tif {- IGNORE THIS COMMENT -} [][Them(Me)=C]"
+    ,"\t\treturn C  -- Ignore this one too."
+    ,""
+    ,"\telse"
+    ,"\t\treturn D"]
+  sample3 = Text.unlines
+    ["                   -- Sample 3:"
+    ,"\tfor number &n in [0, 1, 2, 3]"
+    ,"\t\tif Possible(&n)[Them(Me)=C]"
+    ,"\t\t\treturn C"
+    ,"   \t      "
+    ,""
+    ,"\treturn D"]
+  sample4 = Text.unlines
+    ["\tfor number &n in [...]"
+    ,"\t\treturn &n"]
+  sample5 = Text.unlines
+    ["\tif ⊤"
+    ,"\treturn 0"]
+  sample6 = Text.unlines
+    ["\tif ⊤"
+    ,"\t  return 0"]
+  sample7 = Text.unlines
+    ["\tif ⊤"
+    ,"\t\t\treturn 0"]
+  conf = CodeConfig "action" "actions" "outcome" "utilities"
+  testAllSamples = do
+    verifyParser (codeParser conf) sample1 (Code
+      [ LetN "step" (Num (Lit 0))
+      , For ActionT "a" TotalRange
+        [ For OutcomeT "u" TotalRange
+          [ If (Provable (Ref "step")
+              (Imp
+                (Var $ ParsedClaim "A" Nothing (Equals (Ref "a")))
+                (Var $ ParsedClaim "U" Nothing (Equals (Ref "u")))))
+              [ Return (Just (Ref "a")) ]
+          , LetN "step" (Add (Num $ Ref "step") (Num $ Lit 1)) ] ]
+      , Return Nothing ])
+    verifyParser (codeParser conf) sample2 (Code
+      [ IfElse (Provable (Lit 0)
+        (Var $ ParsedClaim "Them"
+          (Just $ Call "Me" [] Map.empty [] [])
+          (Equals $ Lit "C")))
+        [ Return (Just (Lit "C")) ]
+        [ Return (Just (Lit "D")) ] ])
+    verifyParser (codeParser conf) sample3 (Code
+      [ ForN "n" (ListRange [Lit 0, Lit 1, Lit 2, Lit 3])
+        [ If (Possible (Ref "n")
+            (Var $ ParsedClaim "Them"
+              (Just $ Call "Me" [] Map.empty [] [])
+              (Equals $ Lit "C")))
+          [ Return (Just (Lit "C")) ] ]
+      , Return (Just (Lit "D")) ])
+    verifyParserFails (codeParser conf) sample4
+    verifyParserFails (codeParser conf) sample5
+    verifyParserFails (codeParser conf) sample6
+    verifyParserFails (codeParser conf) sample7
 
 codeMapParser :: Parser Code
-codeMapParser = ActionMap . Map.fromList <$> (assignment `sepEndBy` comma) where
-  assignment = (,) <$> (value <* pIff) <*> parser
-  pIff = void $ choice [try $ symbol "↔", try $ symbol "<->", try $ keyword "iff"]
+codeMapParser = ActionMap . Map.fromList <$> many1 assignment where
+  indent = (many (w *> newline)) *> char '\t'
+  iffParsers = [symbol "↔", symbol "<->", keyword "iff"]
+  pIff = void $ choice $ map try iffParsers
+  assignment = (,) <$> (indent *> value <* pIff) <*> (parser <* eols)
+
+_testCodeMapParser :: IO ()
+_testCodeMapParser = testAllSamples where
+  sample1 = Text.unlines
+    ["\tC ↔ [][Them(Me)=C]"
+    ,"\tD ↔ ~[][Them(Me)=C]"]
+  sample2 = Text.unlines
+    ["\tCD iff A1()=C and A2()=D"
+    ,"\tCC iff A1()=C and A2()=C"
+    ,"\tDD iff A1()=D and A2()=D"
+    ,"\tDC iff A1()=D and A2()=C"]
+  sample3 = Text.unlines
+    ["\tC ↔ [][Them(Me)=C]"
+    ,"\t\tD ↔ ~[][Them(Me)=C]"]
+  sample4 = Text.unlines
+    ["\tC ↔ [][Them(Me)=C]"
+    ,"  D ↔ ~[][Them(Me)=C]"]
+  testAllSamples = do
+    verifyParser codeMapParser sample1 (ActionMap $ Map.fromList
+      [ ("C", Provable (Lit 0) (Var $ ParsedClaim "Them"
+              (Just $ Call "Me" [] Map.empty [] [])
+              (Equals $ Lit "C")))
+      , ("D", Neg $ Provable (Lit 0) (Var $ ParsedClaim "Them"
+              (Just $ Call "Me" [] Map.empty [] [])
+              (Equals $ Lit "C"))) ])
+    verifyParser codeMapParser sample2 (ActionMap $ Map.fromList
+      [ ("CD", (And
+        (Var $ ParsedClaim "A1" Nothing (Equals $ Lit "C"))
+        (Var $ ParsedClaim "A2" Nothing (Equals $ Lit "D"))))
+      , ("CC", (And
+        (Var $ ParsedClaim "A1" Nothing (Equals $ Lit "C"))
+        (Var $ ParsedClaim "A2" Nothing (Equals $ Lit "C"))))
+      , ("DD", (And
+        (Var $ ParsedClaim "A1" Nothing (Equals $ Lit "D"))
+        (Var $ ParsedClaim "A2" Nothing (Equals $ Lit "D"))))
+      , ("DC", (And
+        (Var $ ParsedClaim "A1" Nothing (Equals $ Lit "D"))
+        (Var $ ParsedClaim "A2" Nothing (Equals $ Lit "C")))) ])
+    verifyParserFails codeMapParser sample3
+    verifyParserFails codeMapParser sample4
 
 compileCode :: MonadCompile m => Code -> m (ModalProgram Value CompiledClaim)
 compileCode (Code frags) = do
@@ -260,8 +409,8 @@ compileCode (ActionMap a2smap) = do
 actionsMentioned :: Code -> [Value]
 actionsMentioned (ActionMap m) = Map.keys m
 actionsMentioned (Code frags) = concatMap fragRets frags where
-  fragRets (ForA _ range fs) = rangeLitValues range ++ concatMap fragRets fs
-  fragRets (ForO _ _ fs) = concatMap fragRets fs
+  fragRets (For ActionT _ range fs) = rangeLitValues range ++ concatMap fragRets fs
+  fragRets (For OutcomeT _ _ fs) = concatMap fragRets fs
   fragRets (ForN _ _ fs) = concatMap fragRets fs
   fragRets (If _ fs) = concatMap fragRets fs
   fragRets (IfElse _ fs gs) = concatMap fragRets fs ++ concatMap fragRets gs
@@ -274,8 +423,8 @@ actionsMentioned (Code frags) = concatMap fragRets frags where
 outcomesMentioned :: Code -> [Value]
 outcomesMentioned (ActionMap _) = []
 outcomesMentioned (Code frags) = concatMap fragRets frags where
-  fragRets (ForA _ _ fs) = concatMap fragRets fs
-  fragRets (ForO _ range fs) = rangeLitValues range ++ concatMap fragRets fs
+  fragRets (For ActionT _ _ fs) = concatMap fragRets fs
+  fragRets (For OutcomeT _ range fs) = rangeLitValues range ++ concatMap fragRets fs
   fragRets (ForN _ _ fs) = concatMap fragRets fs
   fragRets (If _ fs) = concatMap fragRets fs
   fragRets (IfElse _ fs gs) = concatMap fragRets fs ++ concatMap fragRets gs
@@ -287,8 +436,7 @@ outcomesMentioned (Code frags) = concatMap fragRets frags where
 claimsMade :: Code -> [ParsedClaim]
 claimsMade (ActionMap m) = concatMap claimsParsed $ Map.elems m
 claimsMade (Code frags) = concatMap fragClaims frags where
-  fragClaims (ForA _ _ fs) = concatMap fragClaims fs
-  fragClaims (ForO _ _ fs) = concatMap fragClaims fs
+  fragClaims (For _ _ _ fs) = concatMap fragClaims fs
   fragClaims (ForN _ _ fs) = concatMap fragClaims fs
   fragClaims (If s fs) = claimsParsed s ++ concatMap fragClaims fs
   fragClaims (IfElse s fs gs) =
@@ -301,7 +449,19 @@ claimsMade (Code frags) = concatMap fragClaims frags where
 
 type CompiledAgent = Map Value (ModalFormula CompiledClaim)
 
-codeToProgram :: MonadError CompileError m => CompileContext -> Code -> m CompiledAgent
+codeToProgram :: MonadError CompileError m =>
+  CompileContext -> Code -> m CompiledAgent
 codeToProgram context code = do
   (prog, state) <- runStateT (compileCode code) context
   return $ Map.fromList [(a, prog a) | a <- actionList state]
+
+-------------------------------------------------------------------------------
+-- Testing
+
+main :: IO ()
+main = do
+  _testRangeParser
+  _testBoundedRangeParser
+  _testCodeParser
+  _testCodeMapParser
+  putStrLn ""

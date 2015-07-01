@@ -87,18 +87,24 @@ instance MultiVarU UVar where
 
 -------------------------------------------------------------------------------
 
-data Controls = Control
+data Controls = Controls
   { ctrlShowFrames :: Bool
   , ctrlShowMap :: Bool
   , ctrlHidden :: Bool
-  } deriving (Eq, Ord, Read, Show)
+  } deriving (Eq, Ord, Read)
+
+instance Show Controls where
+  show (Controls f m h) = "<" ++
+    (if f then "F" else "") ++
+    (if m then "M" else "") ++
+    (if h then "H" else "") ++ ">"
 
 instance Parsable Controls where
   parser = do
     let pWith kw = P.keyword "with" *> P.keyword kw
     (f, m) <- P.anyComboOf (pWith "frames") (pWith "map")
     h <- optional (P.keyword "hidden")
-    return $ Control (isJust f) (isJust m) (isJust h)
+    return $ Controls (isJust f) (isJust m) (isJust h)
 
 -------------------------------------------------------------------------------
 
@@ -111,10 +117,10 @@ data GameObject
 
 instance Parsable GameObject where
   parser
-    =   try pProblem
-    <|> try (Theory <$> defParser theoryDConf)
-    <|> try (Agent <$> defParser agentDConf)
-    <|> try (Agent <$> pOldschoolBot)
+    =   pProblem
+    <|> (Theory <$> defParser theoryDConf)
+    <|> (Agent <$> defParser agentDConf)
+    <|> (Agent <$> pOldschoolBot)
     <|> (Execute <$> parser)
     where
       problemDConf = DefConfig "problem" True "outcome" "outcomes" "action" "actions"
@@ -143,19 +149,19 @@ data Action
   deriving Show
 
 instance Parsable Action where
-  parser = try combatParser <|> try competeParser <|> playParser where
+  parser = combatParser <|> competeParser <|> playParser where
     combatParser = Combat
-      <$> (P.keyword "combat" *> parser <* P.symbol ":")
-      <*> (parser <* P.comma)
-      <*> (parser <* P.end)
+      <$> (P.keyword "combat" *> parser <* P.symbol "!")
+      <*> (parser <* P.keyword "vs")
+      <*> parser
     competeParser = Compete
       <$> (P.keyword "compete" *> parser <* P.symbol ":")
-      <*> (parser <* P.comma)
-      <*> (parser <* P.end)
+      <*> (parser <* P.keyword "vs")
+      <*> parser
     playParser = Play
       <$> (P.keyword "play" *> parser <* P.symbol ":")
-      <*> (parser <* P.comma)
-      <*> ((parser `sepEndBy` P.comma) <* P.end)
+      <*> (parser <* P.powerComma)
+      <*> ((parser `sepEndBy` P.powerComma) <* P.symbol ".")
 
 -------------------------------------------------------------------------------
 
@@ -232,7 +238,8 @@ printVsResults ctrls call1 r1 call2 r2 =
       (show call1) (show r1)
       (show call2) (show r2))
 
-printMultiResults :: (Show a, Show b) => Controls -> Call -> a -> [Call] -> [b] -> IO ()
+printMultiResults :: (Show a, Show b) =>
+  Controls -> Call -> a -> [Call] -> [b] -> IO ()
 printMultiResults ctrls call0 r0 calls rs =
   (unless $ ctrlHidden ctrls)
     (printf "  Result: %s=%s, %s\n\n"
@@ -404,7 +411,8 @@ executeAction setting = execute where
     let { makeTConf def call aList =
       let (tAms, tOms) = effectiveAOs theoryClaimValues (defCode def) call
       in theoryCConf (makeTableR tAms aList) (makeTableR tOms oList) }
-    let tConfs = zipWith3 makeTConf tDefs tCalls aLists
+    let aLists' = if length aLists == 1 then repeat (head aLists) else aLists
+    let tConfs = zipWith3 makeTConf tDefs tCalls aLists'
     let tCompile (conf, call, def) = wrapCErr $ compile conf call def
     p <- run $ wrapCErr $ compile pConf pCall pDef
     ts <- run $ mapM tCompile (zip3 tConfs tCalls tDefs)
@@ -456,7 +464,8 @@ gameToSetting name = foldM addToSetting emptySetting where
     return $ Map.insert name val m
 
 gameParser :: Parser [GameObject]
-gameParser = P.w *> (parser `sepEndBy` P.w) <* eof
+gameParser = many P.ignoredLine *> (parser `sepEndBy` many P.ignoredLine) <* end where
+  end = many (void (char '\t') <|> P.ignoredToken) *> eof -- Ugh.
 
 -------------------------------------------------------------------------------
 
