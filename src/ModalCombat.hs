@@ -14,6 +14,7 @@ programDescription =
 data Options = Options
   { optEnvs :: [FilePath]
   , optFile :: FilePath
+  , optUtf8 :: Bool
   } deriving Show
 
 optionParser :: Parser Options
@@ -25,6 +26,10 @@ optionParser = Options
     <> help "An environment file defining other agents." ))
   <*> argument str
     ( metavar "FILE" )
+  <*> switch
+    (  long "utf8"
+    <> short 'u'
+    <> help "Interpret input files in UTF-8." )
 
 options :: String -> ParserInfo Options
 options name = info (helper <*> optionParser)
@@ -36,7 +41,9 @@ main :: IO ()
 main = do
   name <- getProgName
   opts <- execParser $ options name
-  settings <- mapM compileFile (optEnvs opts)
+  let useUtf8 = optUtf8 opts
+      file = optFile opts
+  settings <- mapM (compileFile useUtf8) (optEnvs opts)
   case settings of
-    [] -> playFile (optFile opts)
-    (x:xs) -> foldM (run .: mergeSettingsR) x xs >>= playFile' (optFile opts)
+    [] -> playFile useUtf8 file
+    (x:xs) -> foldM (run .: mergeSettingsR) x xs >>= playFile' useUtf8 file

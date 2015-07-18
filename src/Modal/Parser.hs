@@ -40,10 +40,10 @@ symbol :: String -> Parser ()
 symbol s = void $ w *> string s <* w
 
 eol :: Parser ()
-eol = try (void newline) <|> try eof <?> "a line ending"
+eol = try (void endOfLine) <|> try eof <?> "a line ending"
 
 eols :: Parser ()
-eols = void $ many1 (w *> newline)
+eols = void $ many1 (w *> endOfLine)
 
 ignoredToken :: Parser ()
 ignoredToken
@@ -63,7 +63,7 @@ _lineComment :: Parser ()
 _lineComment = void ((string "--" *> many (noneOf "\n")) <?> "a line comment")
 
 ignoredLine :: Parser ()
-ignoredLine = many (void (char '\t') <|> ignoredToken) *> void newline
+ignoredLine = many (void (char '\t') <|> ignoredToken) *> void endOfLine
 
 w :: Parser ()
 w = void $ many ignoredToken
@@ -82,7 +82,7 @@ comma = symbol ","
 
 powerComma :: Parser () -- can span newlines and eat tabs etc. Ugh.
 powerComma = void $ wN *> string "," <* wN where
-  wN = void $ many (ignoredToken <|> void (char '\t') <|> void newline)
+  wN = void $ many (ignoredToken <|> void (char '\t') <|> void endOfLine)
 
 brackets :: Parser a -> Parser a
 brackets = between (symbol "[") (symbol "]")

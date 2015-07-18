@@ -207,22 +207,22 @@ codeFragmentParser conf = try indent *> pFrag where
   pForO = pFor OutcomeT outcome outcomes
   pFor t x xs = For t
     <$> (keyword "for" *> keyword x *> varname)
-    <*> (keyword "in" *> rangeParser xs parser <* w <* newline)
+    <*> (keyword "in" *> rangeParser xs parser <* w <* endOfLine)
     <*> pBlock
   pForN = ForN
     <$> (keyword "for" *> keyword "number" *> varname)
-    <*> (keyword "in" *> boundedRange <* w <* newline)
+    <*> (keyword "in" *> boundedRange <* w <* endOfLine)
     <*> pBlock
   pLetN = LetN
     <$> (keyword "let" *> varname <* symbol "=")
     <*> parser <* eols
   pIf = If
-    <$> (keyword "if" *> parser <* w <* newline)
+    <$> (keyword "if" *> parser <* w <* endOfLine)
     <*> pBlock
   pIfElse = IfElse
-    <$> (keyword "if" *> parser <* w <* newline)
+    <$> (keyword "if" *> parser <* w <* endOfLine)
     <*> pBlock
-    <*> (indent *> keyword "else" *> w *> newline *> pBlock)
+    <*> (indent *> keyword "else" *> w *> endOfLine *> pBlock)
   pBlock = many1 $ try $ codeFragmentParser conf{indentLevel=succ $ indentLevel conf}
   pPass = symbol "pass" $> Pass <* w <* eol
   pReturn = try returnThing <|> returnNothing <?> "a return statement"
@@ -349,7 +349,7 @@ _testCodeParser = testAllSamples where
 
 codeMapParser :: Parser Code
 codeMapParser = ActionMap . Map.fromList <$> many1 assignment where
-  indent = (many (w *> newline)) *> char '\t'
+  indent = (many (w *> endOfLine)) *> char '\t'
   iffParsers = [symbol "↔", symbol "<->", keyword "iff"]
   pIff = void $ choice $ map try iffParsers
   assignment = (,) <$> (indent *> parser <* pIff) <*> (parser <* eols)
