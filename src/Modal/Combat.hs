@@ -478,11 +478,11 @@ gameParser = many P.ignoredLine *> (parser `sepEndBy` many P.ignoredLine) <* end
 
 -------------------------------------------------------------------------------
 
-parseFile :: FilePath -> IO [GameObject]
-parseFile path = runFile (parse gameParser path) path
+parseFile :: Bool -> FilePath -> IO [GameObject]
+parseFile useUtf8 path = runFile (parse gameParser path) useUtf8 path
 
-compileFile :: FilePath -> IO Setting
-compileFile path = run . gameToSetting path =<< parseFile path
+compileFile :: Bool -> FilePath -> IO Setting
+compileFile useUtf8 path = run . gameToSetting path =<< parseFile useUtf8 path
 
 playGame :: Name -> [GameObject] -> IO ()
 playGame name game = do
@@ -493,8 +493,8 @@ playGame name game = do
   putStrLn ""
   mapM_ (executeAction setting) (actions game)
 
-playFile :: FilePath -> IO ()
-playFile path = parseFile path >>= playGame path
+playFile :: Bool ->  FilePath -> IO ()
+playFile useUtf8 path = parseFile useUtf8 path >>= playGame path
 
 playGame' :: Name -> Setting -> [GameObject] -> IO ()
 playGame' name base game = do
@@ -508,5 +508,5 @@ playGame' name base game = do
   putStrLn ""
   mapM_ (executeAction setting) (actions game)
 
-playFile' :: FilePath -> Setting -> IO ()
-playFile' path setting = parseFile path >>= playGame' path setting
+playFile' :: Bool -> FilePath -> Setting -> IO ()
+playFile' useUtf8 path setting = parseFile useUtf8 path >>= playGame' path setting
