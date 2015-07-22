@@ -426,5 +426,8 @@ kripkeTable' ks = toTable . kripkeFrames where
 kripkeTable :: (Show k, Ord k) => Map k (ModalFormula k) -> Table
 kripkeTable m = kripkeTable' (M.keys m) m
 
+kripkeTableFiltered :: (Show k, Ord k) => (k -> Bool) -> Map k (ModalFormula k) -> Table
+kripkeTableFiltered f m = kripkeTable' (filter f $ M.keys m) m
+
 displayKripkeFrames :: (Show k, Ord k) => Map k (ModalFormula k) -> IO ()
 displayKripkeFrames = displayTable . kripkeTable

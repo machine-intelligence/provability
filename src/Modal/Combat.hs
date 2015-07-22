@@ -232,11 +232,12 @@ printCompetitionTable ctrls cmap =
     (putStrLn "\n  Full combat map:" >>
       (displayTable $ indentTable "    " $ tuplesToTable $ Map.toAscList cmap))
 
-printKripkeTable :: (Ord v, Show v) => Controls -> Map v (ModalFormula v) -> IO ()
-printKripkeTable ctrls cmap =
-  (when $ ctrlShowFrames ctrls && not (ctrlHidden ctrls))
-    (putStrLn "\n  Kripke frames:" >>
-      (displayTable $ indentTable "    " $ kripkeTable cmap))
+printKripkeTable :: (Ord v, Show v)
+                    => Controls -> (v -> Bool) -> Map v (ModalFormula v) -> IO ()
+printKripkeTable ctrls varFilter cmap = do
+  when (ctrlShowFrames ctrls && not (ctrlHidden ctrls)) $ do
+    putStrLn "\n  Kripke frames:"
+    displayTable $ indentTable "    " $ kripkeTableFiltered varFilter cmap
 
 printVsResults :: (Show a, Show b) => Controls -> Call -> a -> Call -> b -> IO ()
 printVsResults ctrls call1 r1 call2 r2 =
@@ -380,11 +381,11 @@ theoryCConf aTable uTable = CompileConfig
 -------------------------------------------------------------------------------
 
 runModalCombat :: (Eq x, Eq y, Ord x, Ord y, Show x, Show y) =>
-  Controls -> Call -> Call -> Competition x y -> IO ()
-runModalCombat ctrls call1 call2 cmap = do
+  Controls -> Call -> Call -> (VsVar x y -> Bool) -> Competition x y -> IO ()
+runModalCombat ctrls call1 call2 varFilter cmap = do
   let (r1, r2) = modalCombatResolve call1 call2 cmap
   printCompetitionTable ctrls cmap
-  printKripkeTable ctrls cmap
+  printKripkeTable ctrls varFilter cmap
   printVsResults ctrls call1 r1 call2 r2
 
 executeAction :: Setting -> Action -> IO ()
@@ -393,7 +394,7 @@ executeAction setting = execute where
   execute (Combat ctrls call1 call2) = do
     printVsHeader ctrls call1 call2
     cmap <- run $ modalCombatMap1 (lookupAndCompile setting pdconf) call1 call2
-    runModalCombat ctrls call1 call2 (removeDvars cmap)
+    runModalCombat ctrls call1 call2 varIsC cmap
   -- Modal agents referring to each other
   execute (Compete ctrls call1 call2) = do
     printVsHeader ctrls call1 call2
@@ -406,7 +407,7 @@ executeAction setting = execute where
     let env1 = lookupAndCompile setting conf1
     let env2 = lookupAndCompile setting conf2
     cmap <- run $ modalCombatMap env1 env2 call1 call2
-    runModalCombat ctrls call1 call2 cmap
+    runModalCombat ctrls call1 call2 (const True) cmap
   -- Unmodalized universe vs modalized agents
   execute (Play ctrls pCall tCalls) = do
     printMultiHeader ctrls pCall tCalls
@@ -427,7 +428,7 @@ executeAction setting = execute where
     ts <- run $ mapM tCompile (zip3 tConfs tCalls tDefs)
     let cmap = multiCompetition p ts
     printCompetitionTable ctrls cmap
-    printKripkeTable ctrls cmap
+    printKripkeTable ctrls (const True) cmap
     let (pResult, tResults) = multiCompete p ts
     printMultiResults ctrls pCall pResult tCalls tResults
   -- Error wrappers
@@ -441,14 +442,9 @@ executeAction setting = execute where
   -- Helpers specific to the prisoner's dilemma
   cdTable = [("C", C), ("D", D)]
   pdconf = modalCombatCConf cdTable cdTable
-  removeDvars = Map.filterWithKey (const . varIsC) . Map.map negateDs
   varIsC (Vs1 _ _ C) = True
   varIsC (Vs2 _ _ C) = True
   varIsC _ = False
-  negateDs m = m >>= cify where
-    cify (Vs1 x1 x2 D) = Neg (Var $ Vs1 x1 x2 C)
-    cify (Vs2 x1 x2 D) = Neg (Var $ Vs2 x1 x2 C)
-    cify x = Var x
 
 -------------------------------------------------------------------------------
 
