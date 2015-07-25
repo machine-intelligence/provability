@@ -81,6 +81,7 @@ combat with frames! WaitFairBot vs NaiveBot</textarea>
     <pre id="output"></pre>
   </body>
   <script langauge="javascript">
+    // gratuitously copied from https://stackoverflow.com/questions/6140632/how-to-handle-tab-in-textarea (thanks alexwells!)
     document.querySelector("textarea").addEventListener('keydown',function(e) {
       if(e.keyCode === 9) { // tab was pressed
         // get caret position/selection
