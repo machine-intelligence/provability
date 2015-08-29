@@ -9,7 +9,7 @@ theory UDT(action default, number level=0, number step=0)
 		for action &a in actions
 			if [&n]⌜A()=&a → U()=&o⌝
 				return &a
-			let &n = &n + 1
+			let &n = &n + &step
 	return &default
 
 --------------------------------------------------------------------------
