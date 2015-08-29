@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html;charset=utf-8">
+    <script language="javascript" src="rts.js"></script>
+    <script language="javascript" src="lib.js"></script>
+    <script language="javascript" src="out.js"></script>
+    <script>
+      console.log = function(txt) { document.getElementById('output').appendChild(document.createTextNode(txt)); }
+    </script>
+  </head>
+  <body>
+    <h1>Modal Kombat!</h1>
+    <textarea id="input" rows="35" cols="120">
+bot CooperateBot = ⊤
+
+bot DefectBot = ⊥
+
+agent FairBot
+	if [0]⌜Them(Me)=C⌝
+		return C
+	return D
+
+agent PrudentBot
+	if [0]⌜Them(Me)=C⌝ /\ [1]⌜Them(DefectBot)=D⌝
+		return C
+	return D
+
+agent ReverseFairBot
+	if [1]⌜Them(Me)=D⌝
+		return C
+	return D
+
+agent WaitCooperateBot
+	if [0]⌜⊥⌝
+		return D
+	return C
+
+agent WaitFairBot
+	if ((~[0]⌜⊥⌝) /\ [0]⌜Them(Me)=C⌝)
+		return C
+	return D
+
+agent KindaUDTBot
+	if ~[0]⌜Me(Them)=D -> Them(Me)=C⌝/\[0]⌜Me(Them)=C -> Them(Me)=C⌝
+		return C
+	return D
+
+agent NaiveBot
+	if [0]⌜Them(FairBot)=C⌝ /\ [1]⌜Them(DefectBot)=D⌝
+		return C
+	return D
+
+agent SuspiciousBot
+	if ~[1]⌜Them(Me)=D⌝ /\ [1]⌜Them(Me)=C⌝
+		return C
+	return D
+
+agent WaitDefectBot
+	if [30]⌜⊥⌝
+		return C
+	return D
+
+agent SecondChanceBot
+	if [0]⌜Them(Me)=C⌝ \/ (~[1]⌜Them(Me)=D⌝ /\ [2]⌜Them(Me)=C⌝)
+		return C
+	return D
+
+agent KindaMasqueradeBot
+	if [0]⌜Them(SecondChanceBot)=C /\ Them(DefectBot)=D /\ Them(Me)=C⌝ \/ (~[1]⌜Them(SecondChanceBot)=D \/ Them(DefectBot)=C \/ Them(Me)=D⌝ /\ [2]⌜Them(SecondChanceBot)=C /\ Them(DefectBot)=D /\ Them(Me)=C⌝)
+		return C
+	return D
+
+agent IndignationBot
+	if [0]⌜Me(Them)=C -> Them(Me)=D⌝
+		return D
+	return C
+
+combat with frames! WaitFairBot vs NaiveBot</textarea>
+    <input id="btn" type="button" value="Go!" style="display: block;"></input>
+    <pre id="output"></pre>
+  </body>
+  <script langauge="javascript">
+    // gratuitously copied from https://stackoverflow.com/questions/6140632/how-to-handle-tab-in-textarea (thanks alexwells!)
+    document.querySelector("textarea").addEventListener('keydown',function(e) {
+      if(e.keyCode === 9) { // tab was pressed
+        // get caret position/selection
+        var start = this.selectionStart;
+        var end = this.selectionEnd;
+
+        var target = e.target;
+        var value = target.value;
+
+        // set textarea value to: text before caret + tab + text after caret
+        target.value = value.substring(0, start)
+          + "\t"
+          + value.substring(end);
+
+        // put caret at right position again (add one for the tab)
+        this.selectionStart = this.selectionEnd = start + 1;
+
+        // prevent the focus lose
+        e.preventDefault();
+      }
+    },false);
+  </script>
+  <script language="javascript" src="runmain.js" defer></script>
+</html>

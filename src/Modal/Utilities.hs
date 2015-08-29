@@ -18,7 +18,9 @@ module Modal.Utilities
   ) where
 import Prelude hiding (readFile)
 import Control.Monad.Except hiding (mapM, sequence)
+import qualified Data.ByteString as BS
 import Data.Text (Text)
+import Data.Text.Encoding (decodeUtf8)
 import Data.Text.IO (readFile)
 import System.IO (stderr, hPutStrLn)
 import System.Exit hiding (die)
@@ -75,5 +77,10 @@ force = either (error . printf "Forcing failed: %s" . show) id
 run :: Show x => Either x a -> IO a
 run = either die return
 
-runFile :: Show x => (Text -> Either x a) -> FilePath -> IO a
-runFile f path = run . f =<< readFile path
+readFileEnc :: Bool -> FilePath -> IO Text
+readFileEnc useUtf8 = if useUtf8 then readFileUtf8 else readFile
+  where
+    readFileUtf8 fn = decodeUtf8 <$> BS.readFile fn
+
+runFile :: Show x => (Text -> Either x a) -> Bool -> FilePath -> IO a
+runFile f useUtf8 path = run . f =<< readFileEnc useUtf8 path
